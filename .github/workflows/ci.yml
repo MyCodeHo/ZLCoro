@@ -1,0 +1,191 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.os }}-${{ matrix.compiler }}-${{ matrix.build_type }}
+    runs-on: ${{ matrix.os }}
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-20.04]
+        compiler: [gcc-10, gcc-11, clang-12, clang-14]
+        build_type: [Debug, Release]
+        exclude:
+          - os: ubuntu-20.04
+            compiler: gcc-11
+          - os: ubuntu-20.04
+            compiler: clang-14
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Install Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake ninja-build
+        
+        if [[ "${{ matrix.compiler }}" == gcc-* ]]; then
+          sudo apt-get install -y ${{ matrix.compiler }} g++-${${{ matrix.compiler }}#gcc-}
+        else
+          sudo apt-get install -y ${{ matrix.compiler }}
+        fi
+
+    - name: Configure CMake
+      run: |
+        if [[ "${{ matrix.compiler }}" == gcc-* ]]; then
+          export CC=${{ matrix.compiler }}
+          export CXX=g++-${${{ matrix.compiler }}#gcc-}
+        else
+          export CC=${{ matrix.compiler }}
+          export CXX=${${{ matrix.compiler }}%%-*}++
+        fi
+        
+        cmake -B build \
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+          -DZLCORO_BUILD_TESTS=ON \
+          -DZLCORO_BUILD_EXAMPLES=ON \
+          -G Ninja
+
+    - name: Build
+      run: cmake --build build --parallel
+
+    - name: Test
+      run: |
+        cd build
+        ctest --output-on-failure --parallel
+
+    - name: Upload Test Results
+      if: failure()
+      uses: actions/upload-artifact@v3
+      with:
+        name: test-results-${{ matrix.os }}-${{ matrix.compiler }}-${{ matrix.build_type }}
+        path: build/Testing/
+
+  sanitizers:
+    name: Sanitizers-${{ matrix.sanitizer }}
+    runs-on: ubuntu-22.04
+    
+    strategy:
+      matrix:
+        sanitizer: [address, thread, undefined]
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Install Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake ninja-build gcc-11 g++-11
+
+    - name: Configure CMake
+      run: |
+        export CC=gcc-11
+        export CXX=g++-11
+        
+        cmake -B build \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DZLCORO_BUILD_TESTS=ON \
+          -DCMAKE_CXX_FLAGS="-fsanitize=${{ matrix.sanitizer }} -fno-omit-frame-pointer" \
+          -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=${{ matrix.sanitizer }}" \
+          -G Ninja
+
+    - name: Build
+      run: cmake --build build --parallel
+
+    - name: Test
+      run: |
+        cd build
+        ctest --output-on-failure
+
+  code-coverage:
+    name: Code Coverage
+    runs-on: ubuntu-22.04
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Install Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake ninja-build gcc-11 g++-11 lcov
+
+    - name: Configure CMake
+      run: |
+        export CC=gcc-11
+        export CXX=g++-11
+        
+        cmake -B build \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DZLCORO_BUILD_TESTS=ON \
+          -DCMAKE_CXX_FLAGS="--coverage -fno-inline" \
+          -DCMAKE_EXE_LINKER_FLAGS="--coverage" \
+          -G Ninja
+
+    - name: Build
+      run: cmake --build build --parallel
+
+    - name: Test
+      run: |
+        cd build
+        ctest --output-on-failure
+
+    - name: Generate Coverage Report
+      run: |
+        lcov --directory build --capture --output-file coverage.info
+        lcov --remove coverage.info '/usr/*' --output-file coverage.info
+        lcov --list coverage.info
+
+    - name: Upload Coverage
+      uses: codecov/codecov-action@v3
+      with:
+        files: ./coverage.info
+        fail_ci_if_error: true
+
+  clang-format:
+    name: Code Formatting Check
+    runs-on: ubuntu-22.04
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Install clang-format
+      run: sudo apt-get update && sudo apt-get install -y clang-format-14
+
+    - name: Check Formatting
+      run: |
+        find include src examples tests -name '*.cpp' -o -name '*.h' | \
+          xargs clang-format-14 --dry-run --Werror
+
+  clang-tidy:
+    name: Static Analysis
+    runs-on: ubuntu-22.04
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Install Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake ninja-build clang-14 clang-tidy-14
+
+    - name: Configure CMake
+      run: |
+        export CC=clang-14
+        export CXX=clang++-14
+        
+        cmake -B build \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+          -G Ninja
+
+    - name: Run clang-tidy
+      run: |
+        find include src -name '*.cpp' -o -name '*.h' | \
+          xargs clang-tidy-14 -p build
