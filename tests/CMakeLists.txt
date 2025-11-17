@@ -30,7 +30,11 @@ target_link_libraries(task_test PRIVATE
 # 添加到 CTest
 add_test(NAME TaskTest COMMAND task_test)
 
-# 添加更多测试...
-# add_executable(generator_test core/generator_test.cpp)
-# target_link_libraries(generator_test PRIVATE ZLCoro::zlcoro GTest::gtest GTest::gtest_main)
-# add_test(NAME GeneratorTest COMMAND generator_test)
+# Generator 测试
+add_executable(generator_test core/generator_test.cpp)
+target_link_libraries(generator_test PRIVATE 
+    ZLCoro::zlcoro
+    GTest::gtest
+    GTest::gtest_main
+)
+add_test(NAME GeneratorTest COMMAND generator_test)
