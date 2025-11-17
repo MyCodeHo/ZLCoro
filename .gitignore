@@ -57,7 +57,8 @@ Doxyfile.bak
 *.tmp
 *.log
 *.bak
-core
+# Ignore core dump file at repo root only; don't ignore project subdirs like include/zlcoro/core or src/core
+/core
 *.core
 
 # macOS
