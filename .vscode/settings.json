@@ -1,0 +1,33 @@
+{
+    "cmake.sourceDirectory": "${workspaceFolder}",
+    "cmake.buildDirectory": "${workspaceFolder}/build",
+    "cmake.configureOnOpen": true,
+    "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+    "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json",
+    "C_Cpp.default.includePath": [
+        "${workspaceFolder}/include",
+        "${workspaceFolder}/include/**"
+    ],
+    "C_Cpp.default.cppStandard": "c++20",
+    "files.associations": {
+        "coroutine": "cpp",
+        "*.hpp": "cpp",
+        "*.cpp": "cpp",
+        "bit": "cpp",
+        "chrono": "cpp",
+        "compare": "cpp",
+        "exception": "cpp",
+        "algorithm": "cpp",
+        "functional": "cpp",
+        "iterator": "cpp",
+        "memory": "cpp",
+        "limits": "cpp",
+        "numeric": "cpp",
+        "ratio": "cpp",
+        "streambuf": "cpp",
+        "tuple": "cpp",
+        "type_traits": "cpp"
+    },
+    "C_Cpp.errorSquiggles": "enabled",
+    "C_Cpp.intelliSenseEngine": "default"
+}
