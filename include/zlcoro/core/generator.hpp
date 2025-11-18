@@ -40,7 +40,7 @@ public:
     class promise_type {
     public:
         // 构造时不需要存储值
-        promise_type() = default;
+        promise_type() noexcept : value_ptr_(nullptr) {}
 
         // 1. 创建 Generator 对象 (编译器调用)
         Generator get_return_object() {
@@ -62,16 +62,39 @@ public:
         // 4. co_yield 的实现
         // 当协程执行 co_yield value 时:
         // - 编译器会调用 yield_value(value)
-        // - 我们存储这个值到 value_ptr_
-        // - 返回 suspend_always,协程挂起
-        std::suspend_always yield_value(const T& value) noexcept {
-            value_ptr_ = std::addressof(value);  // 存储值的地址
-            return {};  // 挂起协程
+        // - 我们需要处理两种情况:
+        //   a) 左值引用: 直接存储地址 (协程帧中的变量是安全的)
+        //   b) 右值引用: 需要移动到 Promise 中存储 (临时对象会被销毁)
+        
+        // 情况 1: co_yield lvalue (例如: int x = 42; co_yield x;)
+        // 左值是协程帧的一部分,生命周期由协程管理,可以安全地存储指针
+        std::suspend_always yield_value(const T& value) 
+            noexcept(std::is_nothrow_copy_constructible_v<T>) 
+            requires std::copy_constructible<T>
+        {
+            // 对于左值,我们假设它来自协程帧,生命周期安全
+            // 但为了完全安全,我们也可以选择复制
+            // 这里采用折中方案: 存储指针以提高性能
+            value_ptr_ = std::addressof(value);
+            return {};
         }
 
-        std::suspend_always yield_value(T&& value) noexcept {
-            value_ptr_ = std::addressof(value);  // 存储值的地址
-            return {};  // 挂起协程
+        // 情况 2: co_yield rvalue (例如: co_yield 42; 或 co_yield std::string("hello");)
+        // 右值可能是临时对象,会在 yield_value 返回后被销毁
+        // 必须移动到 Promise 的存储中
+        std::suspend_always yield_value(T&& value)
+            noexcept(std::is_nothrow_move_constructible_v<T>)
+            requires std::move_constructible<T>
+        {
+            // 销毁旧值(如果有)
+            if (value_ptr_ == std::addressof(stored_value_)) {
+                std::destroy_at(std::addressof(stored_value_));
+            }
+            
+            // 移动构造新值到 Promise 的存储中
+            std::construct_at(std::addressof(stored_value_), std::move(value));
+            value_ptr_ = std::addressof(stored_value_);
+            return {};
         }
 
         // 5. Generator 不应该使用 co_return value
@@ -95,9 +118,21 @@ public:
             }
         }
 
+        // 析构: 清理存储的值
+        ~promise_type() {
+            // 如果 value_ptr_ 指向 stored_value_,需要析构
+            if (value_ptr_ == std::addressof(stored_value_)) {
+                std::destroy_at(std::addressof(stored_value_));
+            }
+        }
+
     private:
-        const T* value_ptr_ = nullptr;           // 指向当前 yield 的值
-        std::exception_ptr exception_;           // 存储异常
+        // 使用 union 来延迟初始化,避免不必要的构造
+        union {
+            T stored_value_;        // 存储右值的副本
+        };
+        const T* value_ptr_;        // 指向当前值(可能指向协程帧或 stored_value_)
+        std::exception_ptr exception_;
     };
 
     // =========================================================================
