@@ -72,9 +72,12 @@ public:
             noexcept(std::is_nothrow_copy_constructible_v<T>) 
             requires std::copy_constructible<T>
         {
-            // 对于左值,我们假设它来自协程帧,生命周期安全
-            // 但为了完全安全,我们也可以选择复制
-            // 这里采用折中方案: 存储指针以提高性能
+            // ⚠️ 重要：如果之前存储了右值，需要先清理
+            if (value_ptr_ == std::addressof(stored_value_)) {
+                std::destroy_at(std::addressof(stored_value_));
+            }
+            
+            // 对于左值，直接存储指针（协程帧中的变量生命周期安全）
             value_ptr_ = std::addressof(value);
             return {};
         }
