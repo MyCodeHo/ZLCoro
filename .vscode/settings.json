@@ -72,7 +72,15 @@
         "thread": "cpp",
         "cinttypes": "cpp",
         "typeinfo": "cpp",
-        "variant": "cpp"
+        "variant": "cpp",
+        "bitset": "cpp",
+        "codecvt": "cpp",
+        "future": "cpp",
+        "csignal": "cpp",
+        "complex": "cpp",
+        "list": "cpp",
+        "iomanip": "cpp",
+        "typeindex": "cpp"
     },
     "C_Cpp.errorSquiggles": "enabled",
     "C_Cpp.intelliSenseEngine": "default"

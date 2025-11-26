@@ -38,3 +38,13 @@ target_link_libraries(generator_test PRIVATE
     GTest::gtest_main
 )
 add_test(NAME GeneratorTest COMMAND generator_test)
+
+# Scheduler 测试
+add_executable(scheduler_test scheduler/scheduler_test.cpp)
+target_link_libraries(scheduler_test PRIVATE 
+    ZLCoro::zlcoro
+    GTest::gtest
+    GTest::gtest_main
+    pthread  # 线程池需要 pthread
+)
+add_test(NAME SchedulerTest COMMAND scheduler_test)

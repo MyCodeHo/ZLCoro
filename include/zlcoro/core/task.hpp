@@ -328,6 +328,29 @@ public:
         return coro_;
     }
 
+    // 获取结果（需要协程已完成）
+    decltype(auto) result() & {
+        if constexpr (std::is_void_v<T>) {
+            coro_.promise().result();
+            return;
+        } else if constexpr (std::is_reference_v<T>) {
+            return coro_.promise().result();
+        } else {
+            return coro_.promise().result();
+        }
+    }
+
+    decltype(auto) result() && {
+        if constexpr (std::is_void_v<T>) {
+            coro_.promise().result();
+            return;
+        } else if constexpr (std::is_reference_v<T>) {
+            return coro_.promise().result();
+        } else {
+            return std::move(coro_.promise()).result();
+        }
+    }
+
 private:
     std::coroutine_handle<promise_type> coro_;
 };//end class Task
