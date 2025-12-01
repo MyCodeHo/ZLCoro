@@ -39,7 +39,7 @@ std::future<T> async_run(Task<T> task) {
     
     // 创建runner - 使用lambda按值捕获shared_ptr
     auto runner = [state]() {
-        // 确保只执行一次
+        // 确保只执行一次，额外的保护机制
         bool expected = false;
         if (!state->executed.compare_exchange_strong(expected, true)) {
             return;  // 已经被执行过了

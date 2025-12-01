@@ -232,8 +232,6 @@ TEST(ConcurrentTest, MultipleTasks) {
 
 TEST(ConcurrentTest, HeavyLoad) {
     // 测试并发任务的基本功能
-    // 注意：由于已知的高并发竞态条件（见 BUG_FIX.md Bug #7）
-    // 这里采用保守的测试策略
     
     std::atomic<int> completed{0};
     std::vector<std::future<void>> futures;
