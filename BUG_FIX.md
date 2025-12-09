@@ -276,6 +276,44 @@ TEST(ConcurrentTest, MultipleTasks) {
 
 ---
 
+## Bug #8: EventLoop 定时器排序错误 ✅
+
+**状态**: 已修复  
+**修复日期**: 2025-12-09
+
+**问题**: 定时器使用 `std::map<TimerId, Timer>` 按 TimerId 排序，但 `process_timers()` 错误地假设第一个元素是最早到期的。
+
+**触发场景**:
+```cpp
+loop.add_timer(1000, callback1);  // TimerId=0, expire in 1000ms
+loop.add_timer(100, callback2);   // TimerId=1, expire in 100ms
+
+// map 按 TimerId 排序：
+// [0] -> 1000ms  <- begin()
+// [1] -> 100ms
+
+// process_timers() 使用 begin() 计算超时 → 1000ms
+// callback2 应该 100ms 执行，却被延迟到 1000ms！
+```
+
+**修复方案**: 使用 `std::multimap<time_point, pair<TimerId, Callback>>` 按到期时间排序。
+
+```cpp
+// 修改前
+std::map<TimerId, Timer> timers_;  // 按 TimerId 排序
+
+// 修改后
+std::multimap<std::chrono::steady_clock::time_point,
+              std::pair<TimerId, TimerCallback>> timers_;  // 按到期时间排序
+
+// 现在 begin() 就是最早到期的定时器
+auto next_expire = timers_.begin()->first;
+```
+
+**测试验证**: 51/51 tests passing
+
+---
+
 ## 总结
 
 ### 已修复的 Bug
@@ -286,12 +324,14 @@ TEST(ConcurrentTest, MultipleTasks) {
 5. ✅ co_await schedule() 的多线程竞争
 6. ✅ IOTest heap-use-after-free
 7. ✅ SchedulerTest stack-use-after-scope
+8. ✅ EventLoop 定时器排序错误
 
 ### 核心设计原则
 1. **协程不应在内部重新调度** - 避免嵌套协程和生命周期问题
 2. **避免协程中使用 lambda** - 使用独立函数确保生命周期明确
 3. **使用 shared_ptr 管理生命周期** - 确保异步执行时对象有效
 4. **调用者负责调度** - async_run() 统一管理协程调度
+5. **数据结构要匹配使用场景** - 排序依据要和查找逻辑一致
 
 ### 测试状态
 - **总计**: 51/51 tests passing (100%)
@@ -302,4 +342,4 @@ TEST(ConcurrentTest, MultipleTasks) {
 
 ---
 
-**最后更新**: 2025-12-02
+**最后更新**: 2025-12-09

@@ -113,14 +113,19 @@ public:
         
         std::lock_guard<std::mutex> lock(mutex_);
         TimerId id = next_timer_id_++;
-        timers_[id] = Timer{expire_time, std::move(callback)};
+        timers_.emplace(expire_time, std::make_pair(id, std::move(callback)));
         return id;
     }
 
     // 取消定时器
     void cancel_timer(TimerId id) {
         std::lock_guard<std::mutex> lock(mutex_);
-        timers_.erase(id);
+        for (auto it = timers_.begin(); it != timers_.end(); ++it) {
+            if (it->second.first == id) {
+                timers_.erase(it);
+                break;
+            }
+        }
     }
 
     // 检查是否正在运行
@@ -153,14 +158,11 @@ private:
         {
             std::lock_guard<std::mutex> lock(mutex_);
             
+            // multimap 按 expire_time 排序，从头开始处理到期的定时器
             auto it = timers_.begin();
-            while (it != timers_.end()) {
-                if (it->second.expire_time <= now) {
-                    expired_callbacks.push_back(std::move(it->second.callback));
-                    it = timers_.erase(it);
-                } else {
-                    ++it;
-                }
+            while (it != timers_.end() && it->first <= now) {
+                expired_callbacks.push_back(std::move(it->second.second));
+                it = timers_.erase(it);
             }
         }
         
@@ -175,7 +177,8 @@ private:
             return 100;  // 默认 100ms
         }
         
-        auto next_expire = timers_.begin()->second.expire_time;
+        // multimap 按 expire_time 排序，第一个就是最早到期的
+        auto next_expire = timers_.begin()->first;
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
             next_expire - now);
         
@@ -183,17 +186,15 @@ private:
     }
 
 private:
-    // 定时器结构
-    struct Timer {
-        std::chrono::steady_clock::time_point expire_time;
-        TimerCallback callback;
-    };
-
     EpollPoller poller_;                                    // Epoll 轮询器
     std::atomic<bool> running_;                             // 运行标志
     std::deque<std::coroutine_handle<>> ready_queue_;       // 就绪队列
     std::mutex mutex_;                                       // 保护共享数据
-    std::map<TimerId, Timer> timers_;                       // 定时器
+    
+    // 定时器：按到期时间排序，value 是 (TimerId, Callback)
+    // 使用 multimap 支持多个定时器同时到期
+    std::multimap<std::chrono::steady_clock::time_point, 
+                  std::pair<TimerId, TimerCallback>> timers_;
     TimerId next_timer_id_;                                 // 下一个定时器 ID
 };
 
