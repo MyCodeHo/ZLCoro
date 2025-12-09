@@ -62,8 +62,10 @@ ctest --output-on-failure
 
 ### 示例代码
 
+#### 基础协程示例
+
 ```cpp
-#include "zlcoro/core/task.h"
+#include "zlcoro/zlcoro.hpp"
 #include <iostream>
 
 using namespace zlcoro;
@@ -72,17 +74,43 @@ Task<int> compute() {
     co_return 42;
 }
 
-Task<void> main_task() {
+Task<void> example() {
     int result = co_await compute();
     std::cout << "Result: " << result << "\n";
 }
 
 int main() {
-    auto task = main_task();
-    task.resume();
+    example().sync_wait();
     return 0;
 }
 ```
+
+#### 异步 I/O 示例
+
+```cpp
+#include "zlcoro/zlcoro.hpp"
+#include "zlcoro/scheduler/async.hpp"
+#include <iostream>
+
+using namespace zlcoro;
+
+Task<void> write_and_read() {
+    // 写入文件
+    co_await write_file("/tmp/test.txt", "Hello, ZLCoro!");
+    
+    // 读取文件
+    std::string content = co_await read_file("/tmp/test.txt");
+    std::cout << "Content: " << content << "\n";
+}
+
+int main() {
+    auto future = async_run(write_and_read());
+    future.get();
+    return 0;
+}
+```
+
+更多示例请查看 [examples](examples/) 目录。
 
 ## 项目结构
 
@@ -103,9 +131,15 @@ ZLCoro/
 
 ## 文档
 
-- [架构设计](docs/ARCHITECTURE.md)
-- [API 参考](docs/API.md)
-- [性能基准](docs/BENCHMARKS.md)
+### 核心文档
+- [项目进度](PROGRESS.md) - 开发进度和里程碑
+- [架构设计](docs/ARCHITECTURE.md) - 系统架构和设计原则
+- [API 参考](docs/API.md) - 完整的 API 文档
+- [性能基准](docs/BENCHMARKS.md) - 性能目标和测试方法
+
+### 开发文档
+- [开发指南](DEVELOPMENT.md) - 开发工作流和常用命令
+- [Bug 修复记录](BUG_FIX.md) - 已修复的 Bug 和设计原则
 
 ## 性能目标
 
@@ -117,10 +151,15 @@ ZLCoro/
 
 ## 开发路线
 
-- [x] 核心协程基础设施
+### 已完成 ✅
+- [x] 核心协程基础设施 (Task, Generator)
+- [x] 线程池调度器 (ThreadPool, Scheduler)
+- [x] 基于 Epoll 的异步 I/O (EpollPoller, EventLoop, AsyncFile, AsyncSocket)
+- [x] 单元测试 (51/51 tests passing)
+
+### 进行中 🚧
 - [ ] 工作窃取调度器
-- [ ] 基于 Epoll 的异步 I/O
-- [ ] 同步原语
+- [ ] 同步原语 (Mutex, Channel, WaitGroup)
 - [ ] 内存池优化
 - [ ] 完善性能基准测试
 

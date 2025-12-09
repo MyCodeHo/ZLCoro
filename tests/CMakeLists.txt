@@ -48,3 +48,13 @@ target_link_libraries(scheduler_test PRIVATE
     pthread  # 线程池需要 pthread
 )
 add_test(NAME SchedulerTest COMMAND scheduler_test)
+
+# I/O 测试
+add_executable(io_test io/io_test.cpp)
+target_link_libraries(io_test PRIVATE 
+    ZLCoro::zlcoro
+    GTest::gtest
+    GTest::gtest_main
+    pthread
+)
+add_test(NAME IOTest COMMAND io_test)

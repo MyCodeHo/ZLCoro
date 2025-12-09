@@ -6,8 +6,15 @@
 #include <atomic>
 #include <chrono>
 #include <thread>
+#include <memory>
 
 using namespace zlcoro;
+
+// 辅助协程函数（避免 lambda 生命周期问题）
+Task<void> increment_counter(std::shared_ptr<std::atomic<int>> counter) {
+    (*counter)++;
+    co_return;
+}
 
 // =============================================================================
 // ThreadPool 测试
@@ -211,29 +218,27 @@ TEST(AsyncRunTest, ChainedCoroutines) {
 // =============================================================================
 
 TEST(ConcurrentTest, MultipleTasks) {
-    std::atomic<int> counter{0};
+    // 使用 shared_ptr 确保 counter 的生命周期
+    auto counter = std::make_shared<std::atomic<int>>(0);
     std::vector<std::future<void>> futures;
     
     for (int i = 0; i < 10; ++i) {
-        auto coro = [&counter]() -> Task<void> {
-            counter++;
-            co_return;
-        };
-        
-        futures.push_back(async_run(coro()));
+        // 使用独立的协程函数，避免 lambda 生命周期问题
+        futures.push_back(async_run(increment_counter(counter)));
     }
     
     for (auto& future : futures) {
         future.get();
     }
     
-    EXPECT_EQ(counter.load(), 10);
+    EXPECT_EQ(counter->load(), 10);
 }
 
 TEST(ConcurrentTest, HeavyLoad) {
     // 测试并发任务的基本功能
     
-    std::atomic<int> completed{0};
+    // 使用 shared_ptr 确保生命周期正确
+    auto completed = std::make_shared<std::atomic<int>>(0);
     std::vector<std::future<void>> futures;
     
     const int N = 10;
@@ -241,13 +246,8 @@ TEST(ConcurrentTest, HeavyLoad) {
     
     // 创建简单的并发任务
     for (int i = 0; i < N; ++i) {
-        auto coro = [&completed]() -> Task<void> {
-            // 简单的原子操作
-            completed.fetch_add(1);
-            co_return;
-        };
-        
-        futures.push_back(async_run(coro()));
+        // 使用独立的协程函数，避免 lambda 生命周期问题
+        futures.push_back(async_run(increment_counter(completed)));
     }
     
     // 等待所有任务完成
@@ -256,5 +256,5 @@ TEST(ConcurrentTest, HeavyLoad) {
     }
     
     // 验证所有任务都执行了
-    EXPECT_EQ(completed.load(), N);
+    EXPECT_EQ(completed->load(), N);
 }

@@ -165,6 +165,12 @@ cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON ..
 - 函数和变量使用 snake_case
 - 遵循 C++20 现代特性
 
+### 协程开发注意事项
+1. **避免协程内部重新调度** - 不要在协程方法内使用 `co_await schedule()`
+2. **避免 lambda 协程** - 尤其在循环中，使用独立函数
+3. **生命周期管理** - 使用 `shared_ptr` 管理异步对象
+4. **调用者负责调度** - 让 `async_run()` 统一管理协程调度
+
 ### 提交代码
 ```bash
 git add .
@@ -186,17 +192,47 @@ make test_target_name
 
 # 运行特定测试
 ctest -R test_name -V
+
+# 运行所有测试（推荐）
+ctest --output-on-failure
 ```
 
-## 🎯 下一步
+## 🎯 开发路线图
 
-1. 实现核心协程类型（Task, Generator）
-2. 实现工作窃取调度器
-3. 实现 Epoll I/O 调度器
-4. 添加同步原语（Mutex, Channel）
-5. 性能优化和测试
+### Phase 1-4: 已完成 ✅
+- ✅ 核心协程类型（Task, Generator）
+- ✅ 线程池调度器（ThreadPool + Scheduler）
+- ✅ 异步 I/O（AsyncFile + AsyncSocket）
+- ✅ Epoll 事件循环（EpollPoller + EventLoop）
+
+### Phase 5: 同步原语（计划中）
+- [ ] Channel - 协程间通信
+- [ ] Mutex - 协程互斥锁
+- [ ] WaitGroup - 协程等待组
+- [ ] Semaphore - 信号量
+
+### Phase 6: 性能优化（计划中）
+- [ ] 工作窃取调度器
+- [ ] 协程池和内存池
+- [ ] io_uring 支持
+
+### Phase 7: 高级特性（计划中）
+- [ ] HTTP 客户端/服务器
+- [ ] Echo 服务器示例
+- [ ] DNS 解析器
+
+### Phase 8: 生产就绪（计划中）
+- [ ] 完整的性能基准测试
+- [ ] 压力测试和稳定性验证
+- [ ] 完善的文档和示例
+
+## 📊 当前状态
+
+**版本**: 0.4.0  
+**测试状态**: 51/51 tests passing (100%)  
+**代码质量**: AddressSanitizer clean  
+**文档状态**: 核心文档完整
 
 ---
 
-**当前版本**: 0.1.0  
-**最后更新**: 2025-11-08
+**最后更新**: 2025-12-02
