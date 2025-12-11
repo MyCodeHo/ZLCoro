@@ -11,6 +11,7 @@
 #include <string>
 #include <memory>
 #include <stdexcept>
+#include <utility>
 
 namespace zlcoro {
 
@@ -36,16 +37,14 @@ public:
 
     // 移动构造
     AsyncSocket(AsyncSocket&& other) noexcept 
-        : fd_(other.fd_), event_loop_(other.event_loop_) {
-        other.fd_ = -1;
+        : fd_(std::exchange(other.fd_, -1)), event_loop_(other.event_loop_) {
     }
 
     AsyncSocket& operator=(AsyncSocket&& other) noexcept {
         if (this != &other) {
             close();
-            fd_ = other.fd_;
+            fd_ = std::exchange(other.fd_, -1);
             // event_loop_ 是引用，不需要赋值
-            other.fd_ = -1;
         }
         return *this;
     }
@@ -183,23 +182,25 @@ public:
 
     // 异步接受连接
     Task<AsyncSocket> accept() {
-        co_await ReadAwaiter{fd_, event_loop_};
-        
-        sockaddr_in addr{};
-        socklen_t len = sizeof(addr);
-        
-        int client_fd = ::accept(fd_, reinterpret_cast<sockaddr*>(&addr), &len);
-        
-        if (client_fd == -1) {
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                // 没有连接可接受，重新等待
-                co_return co_await accept();
+        while (true) {
+            co_await ReadAwaiter{fd_, event_loop_};
+            
+            sockaddr_in addr{};
+            socklen_t len = sizeof(addr);
+            
+            int client_fd = ::accept(fd_, reinterpret_cast<sockaddr*>(&addr), &len);
+            
+            if (client_fd == -1) {
+                if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                    // 没有连接可接受，继续循环等待
+                    continue;
+                }
+                throw std::runtime_error(
+                    std::string("accept failed: ") + strerror(errno));
             }
-            throw std::runtime_error(
-                std::string("accept failed: ") + strerror(errno));
+            
+            co_return AsyncSocket(client_fd);
         }
-        
-        co_return AsyncSocket(client_fd);
     }
 
     // 异步读取
@@ -207,32 +208,35 @@ public:
         std::string buffer;
         buffer.resize(max_len);
         
-        co_await ReadAwaiter{fd_, event_loop_};
-        
-        ssize_t n = ::read(fd_, buffer.data(), max_len);
-        
-        if (n == -1) {
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                // 没有数据，重新等待
-                co_return co_await read(max_len);
+        while (true) {
+            co_await ReadAwaiter{fd_, event_loop_};
+            
+            ssize_t n = ::read(fd_, buffer.data(), max_len);
+            
+            if (n == -1) {
+                if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                    // 没有数据，继续循环等待
+                    continue;
+                }
+                throw std::runtime_error(
+                    std::string("read failed: ") + strerror(errno));
             }
-            throw std::runtime_error(
-                std::string("read failed: ") + strerror(errno));
+            
+            if (n == 0) {
+                // 连接关闭
+                buffer.clear();
+            } else {
+                buffer.resize(n);
+            }
+            
+            co_return buffer;
         }
-        
-        if (n == 0) {
-            // 连接关闭
-            buffer.clear();
-        } else {
-            buffer.resize(n);
-        }
-        
-        co_return buffer;
     }
 
-    // 异步写入
+    // 异步写入（字符串版本）
+    // 注意：直接返回重载版本，避免不必要的协程嵌套
     Task<size_t> write(const std::string& data) {
-        co_return co_await write(data.data(), data.size());
+        return write(data.data(), data.size());
     }
 
     Task<size_t> write(const char* data, size_t len) {

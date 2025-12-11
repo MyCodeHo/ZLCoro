@@ -9,6 +9,7 @@
 #include <sys/stat.h>
 #include <cstring>
 #include <memory>
+#include <utility>
 
 namespace zlcoro {
 
@@ -45,15 +46,13 @@ public:
     AsyncFile& operator=(const AsyncFile&) = delete;
 
     // 移动构造
-    AsyncFile(AsyncFile&& other) noexcept : fd_(other.fd_) {
-        other.fd_ = -1;
+    AsyncFile(AsyncFile&& other) noexcept : fd_(std::exchange(other.fd_, -1)) {
     }
 
     AsyncFile& operator=(AsyncFile&& other) noexcept {
         if (this != &other) {
             close();
-            fd_ = other.fd_;
-            other.fd_ = -1;
+            fd_ = std::exchange(other.fd_, -1);
         }
         return *this;
     }

@@ -171,6 +171,9 @@ private:
             callback();
         }
         
+        // 重新获取当前时间（考虑回调执行耗时）
+        now = std::chrono::steady_clock::now();
+        
         // 计算下次超时时间
         std::lock_guard<std::mutex> lock(mutex_);
         if (timers_.empty()) {

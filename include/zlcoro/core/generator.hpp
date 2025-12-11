@@ -168,10 +168,12 @@ public:
 
         // 前置++: 恢复协程,生成下一个值
         Iterator& operator++() {
-            handle_.resume();  // 恢复协程执行
-            if (handle_.done()) {
-                // 协程完成,检查是否有异常
-                handle_.promise().rethrow_if_exception();
+            if (handle_ && !handle_.done()) {
+                handle_.resume();  // 恢复协程执行
+                if (handle_.done()) {
+                    // 协程完成,检查是否有异常
+                    handle_.promise().rethrow_if_exception();
+                }
             }
             return *this;
         }
@@ -183,6 +185,10 @@ public:
 
         // 解引用: 返回当前 yield 的值
         reference operator*() const {
+            // 确保句柄有效且未完成
+            if (!handle_ || handle_.done()) {
+                throw std::runtime_error("Generator iterator out of range");
+            }
             return handle_.promise().value();
         }
 
@@ -228,8 +234,7 @@ public:
 
     // 支持移动
     Generator(Generator&& other) noexcept
-        : handle_(other.handle_) {
-        other.handle_ = nullptr;
+        : handle_(std::exchange(other.handle_, nullptr)) {
     }
 
     Generator& operator=(Generator&& other) noexcept {
@@ -237,8 +242,7 @@ public:
             if (handle_) {
                 handle_.destroy();
             }
-            handle_ = other.handle_;
-            other.handle_ = nullptr;
+            handle_ = std::exchange(other.handle_, {});
         }
         return *this;
     }
@@ -261,6 +265,7 @@ public:
             handle_.resume();  // 启动协程,执行到第一个 co_yield
             if (handle_.done()) {
                 // 如果立即完成(没有 yield 任何值),检查异常
+                // 注意：迭代过程中的异常会在 Iterator::operator++ 中检查
                 handle_.promise().rethrow_if_exception();
             }
         }

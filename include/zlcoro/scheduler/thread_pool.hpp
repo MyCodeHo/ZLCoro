@@ -101,7 +101,7 @@ public:
 
 private:
     // 工作线程函数
-    void worker_thread(size_t thread_id) {
+    void worker_thread([[maybe_unused]] size_t thread_id) {
         while (true) {
             std::optional<Task> task;
             

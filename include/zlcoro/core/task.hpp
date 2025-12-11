@@ -5,6 +5,7 @@
 #include <memory>
 #include <type_traits>
 #include <utility>
+#include <cassert>
 
 namespace zlcoro {
 
@@ -104,6 +105,9 @@ public:
         if (exception_) {
             std::rethrow_exception(exception_);
         }
+        // 防御性检查：确保有值可返回
+        // 正常情况下协程必须调用 return_value() 或抛出异常
+        assert(has_value_ && "TaskPromise::result() called but no value was set");
         return value_;
     }
 
@@ -111,6 +115,7 @@ public:
         if (exception_) {
             std::rethrow_exception(exception_);
         }
+        assert(has_value_ && "TaskPromise::result() called but no value was set");
         return std::move(value_);
     }
 
@@ -254,9 +259,9 @@ public:
     struct Awaiter {
         std::coroutine_handle<promise_type> coro_;
 
-        // 总是需要等待（因为任务可能还没完成）
+        // 如果任务已经完成，不需要挂起
         bool await_ready() const noexcept {
-            return false;
+            return !coro_ || coro_.done();
         }
 
         // 当前协程挂起，启动被等待的协程

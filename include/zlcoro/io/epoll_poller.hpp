@@ -114,7 +114,7 @@ public:
                 std::string("epoll_wait failed: ") + strerror(errno));
         }
         
-        // 收集就绪的协程
+        // 收集就绪的协程（使用 set 去重）
         std::vector<std::coroutine_handle<>> ready_coros;
         ready_coros.reserve(n);
         
@@ -124,13 +124,9 @@ public:
             
             auto it = handlers_.find(fd);
             if (it != handlers_.end()) {
-                // 检查是否是我们关心的事件
-                if (revents & it->second.events) {
-                    ready_coros.push_back(it->second.coro);
-                }
-                
-                // 检查错误事件
-                if (revents & (EPOLLERR | EPOLLHUP)) {
+                // 检查是否触发了我们关心的事件或错误事件
+                // 错误事件（EPOLLERR | EPOLLHUP）总是需要处理
+                if ((revents & it->second.events) || (revents & (EPOLLERR | EPOLLHUP))) {
                     ready_coros.push_back(it->second.coro);
                 }
             }
