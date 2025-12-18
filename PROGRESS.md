@@ -1,331 +1,290 @@
 # ZLCoro 项目进度
 
-> 基于 C++20 协程的高性能异步编程框架开发进度
+> 基于 C++20 协程的高性能异步编程框架开发进度  
+> **最后更新**: 2025-12-18 | **版本**: 0.5.0
 
 ## 📊 总体进度
 
-### 里程碑状态
-- ✅ **Phase 1: Task 协程类型** (已完成)
-- ✅ **Phase 2: Generator 生成器** (已完成)
-- ✅ **Phase 3: Scheduler 调度器** (已完成)
-- ✅ **Phase 4: Async I/O 异步 I/O** (已完成)
-- 🚧 **Phase 5: 同步原语** (规划中)
-- 🚧 **Phase 6: 性能优化** (规划中)
-- 🚧 **Phase 7: 高级功能** (规划中)
-- 🚧 **Phase 8: 生产就绪** (规划中)
+### 🎯 里程碑状态
+- ✅ **Phase 1**: Task 协程类型
+- ✅ **Phase 2**: Generator 生成器
+- ✅ **Phase 3**: Scheduler 调度器
+- ✅ **Phase 4**: Async I/O 异步 I/O
+- ✅ **Phase 5**: 同步原语 (Channel/Mutex/Semaphore/WaitGroup)
+- 🚧 **Phase 6**: 性能优化 (工作窃取/内存池/io_uring)
+- 🚧 **Phase 7**: 高级功能 (HTTP/WebSocket/DNS)
+- 🚧 **Phase 8**: 生产就绪 (基准测试/文档/部署)
 
-### 测试状态
-**51/51 tests passing (100%)** 🎉
+### 🧪 测试状态
+**65/65 tests passing (100%)** 🎉
 
-| 测试套件 | 通过/总数 | 状态 |
-|---------|---------|------|
-| TaskTest | 15/15 | ✅ |
-| GeneratorTest | 16/16 | ✅ |
-| SchedulerTest | 13/13 | ✅ |
-| IOTest | 7/7 | ✅ |
+| 模块 | 测试数 | 状态 |
+|------|--------|------|
+| Task | 15 | ✅ |
+| Generator | 16 | ✅ |
+| Scheduler | 13 | ✅ |
+| I/O | 7 | ✅ |
+| Sync | 14 | ✅ |
 
-### 代码统计
-- 头文件：12 个
-- 源文件：0 个（Header-Only）
-- 测试文件：4 个
-- 示例文件：5 个
-- 代码行数：~5000 行
+### 📦 代码统计
+- **头文件**: 16 个（Header-Only）
+- **测试文件**: 5 个
+- **示例程序**: 5 个
+- **代码行数**: ~6500 行
 
 ---
 
-# 第一阶段完成：Task<T> 协程基础类型
+## 🏗️ 架构概览
 
-## ✅ 已完成的工作
+```
+┌─────────────────────────────────────┐
+│         应用层                       │
+├─────────────────────────────────────┤
+│    同步原语 (sync/)                  │
+│    Channel | Mutex | WaitGroup      │
+├─────────────────────────────────────┤
+│    异步 I/O (io/)                    │
+│    EpollPoller | EventLoop          │
+│    AsyncFile | AsyncSocket          │
+├─────────────────────────────────────┤
+│    调度器 (scheduler/)               │
+│    ThreadPool | Scheduler           │
+├─────────────────────────────────────┤
+│    协程核心 (core/)                  │
+│    Task<T> | Generator<T>           │
+└─────────────────────────────────────┘
+```
 
-### 1. 核心实现 (`include/zlcoro/core/task.hpp`)
+---
 
-实现了完整的 Task<T> 协程类型，包括：
+## 📚 Phase 1: Task<T> 协程类型
 
-#### **Promise 类型**
-- `TaskPromiseBase`: 基类，处理协程的挂起/恢复逻辑
-- `TaskPromise<T>`: 处理有返回值的协程
-- `TaskPromise<void>`: 处理 void 返回的协程  
-- `TaskPromise<T&>`: 处理引用返回的协程
+### 核心实现 (`include/zlcoro/core/task.hpp`)
 
-#### **核心机制**
-- ✅ **惰性求值**: 协程在创建时不立即执行(`initial_suspend` 返回 `suspend_always`)
-- ✅ **协程链**: 支持 `co_await` 另一个 Task，自动管理延续(continuation)
-- ✅ **异常处理**: 完整的异常捕获和传播机制
-- ✅ **移动语义**: Task 只能移动，不可复制，正确管理协程句柄的所有权
-- ✅ **多种返回类型**: 支持值类型、void、引用类型
+**Promise 类型体系**:
+- `TaskPromiseBase` - 基类，管理 continuation
+- `TaskPromise<T>` - 值返回
+- `TaskPromise<void>` - 无返回值
+- `TaskPromise<T&>` - 引用返回
 
-#### **API 接口**
-- `co_await task`: 等待另一个协程完成
-- `task.sync_wait()`: 同步阻塞等待协程完成（用于测试和边界场景）
+**核心特性**:
+- ✅ 惰性求值 (`initial_suspend` 返回 `suspend_always`)
+- ✅ 协程链 (`co_await` 支持，自动管理 continuation)
+- ✅ 异常传播（完整的异常捕获和重新抛出）
+- ✅ 移动语义（禁止拷贝，正确管理句柄所有权）
 
-### 2. 单元测试 (`tests/core/task_test.cpp`)
-
-创建了 **15 个单元测试**，覆盖：
-- 基本功能：int/void/string/引用返回
-- 协程链：单层、多层、多个 await
-- 异常处理：抛出、传播、捕获
-- 移动语义：移动构造、移动赋值
-- 复杂场景：复杂对象、条件分支、递归协程
-
-**测试结果**: ✅ 15/15 通过
-
-### 3. 示例程序 (`examples/01_basic_task.cpp`)
-
-创建了 **7 个示例**，展示：
-1. 最简单的协程
-2. void 返回类型
-3. 协程链式调用
-4. 多个 co_await
-5. 异常处理
-6. 复杂工作流
-7. 递归协程（斐波那契）
-
-**运行结果**: ✅ 所有示例正常运行
-
-### 4. 构建系统
-
-- ✅ CMake 配置正确
-- ✅ 使用 g++ 11.4 (支持 C++20 协程)
-- ✅ 集成 Google Test
-- ✅ 支持 `make` 和 `ctest`
-
-
-### 协程的三个核心概念
-
-#### 1. **Promise Type** (承诺类型)
-Promise 定义了协程的行为：
-- `get_return_object()`: 创建 Task 对象
-- `initial_suspend()`: 协程启动时的行为
-- `final_suspend()`: 协程结束时的行为
-- `return_value()` / `return_void()`: 如何存储返回值
-- `unhandled_exception()`: 如何处理异常
-
-#### 2. **Awaiter** (等待器)
-Awaiter 定义了 `co_await` 的行为：
-- `await_ready()`: 是否需要挂起
-- `await_suspend()`: 挂起时做什么（通常是调度）
-- `await_resume()`: 恢复时返回什么（通常是结果）
-
-#### 3. **Coroutine Handle** (协程句柄)
-协程句柄是对协程状态的引用：
-- `handle.resume()`: 恢复协程执行
-- `handle.done()`: 检查协程是否完成
-- `handle.destroy()`: 销毁协程
-- `handle.promise()`: 获取 Promise 对象
-
-### 协程执行流程示例
-
+**API**:
 ```cpp
-Task<int> inner() {
-    co_return 10;  // 1. 调用 promise.return_value(10)
-}                   // 2. 调用 final_suspend()，设置延续
-
-Task<int> outer() {
-    int x = co_await inner();  // 3. 调用 inner 的 Awaiter
-                                // 4. await_suspend 设置延续
-                                // 5. 恢复 inner 协程
-                                // 6. inner 完成后恢复 outer
-                                // 7. await_resume 返回 10
-    co_return x * 2;           // 8. 返回 20
+Task<int> compute() { co_return 42; }
+Task<void> caller() { 
+    int result = co_await compute();  // 协程链
 }
 ```
 
----
+### 测试覆盖 (15 个测试)
+- 基本功能: int/void/string/引用返回
+- 协程链: 单层/多层/多个 await
+- 异常处理: 抛出/传播/捕获
+- 移动语义: 移动构造/移动赋值
+- 复杂场景: 条件分支/递归协程
 
-## 🎯 当前项目状态
-
-```
-ZLCoro/
-├── include/zlcoro/core/
-│   ├── task.hpp          ✅ 完整实现 
-│   └── generator.hpp     ✅ 完整实现
-├── tests/core/
-│   ├── task_test.cpp     ✅ 15 个测试全部通过
-│   └── generator_test.cpp ✅ 16 个测试全部通过
-├── examples/
-│   ├── 01_basic_task.cpp ✅ 7 个示例正常运行
-│   └── 02_generator_example.cpp ✅ 10 个示例正常运行
-└── build/                ✅ 编译成功
-```
+**示例**: `examples/01_basic_task.cpp` (7 个示例)
 
 ---
 
-# 第二阶段完成：Generator<T> 生成器协程
+## 📚 Phase 2: Generator<T> 生成器
 
-## ✅ 已完成的工作
+### 核心实现 (`include/zlcoro/core/generator.hpp`)
 
-### 1. 核心实现 (`include/zlcoro/core/generator.hpp`)
+**核心机制**:
+- ✅ `co_yield` 支持（左值/右值区分处理）
+- ✅ 惰性求值（`begin()` 时才开始生成）
+- ✅ 迭代器接口（支持 range-based for）
+- ✅ 提前终止（break 时正确清理）
 
-实现了完整的 Generator<T> 协程类型，包括：
-
-#### **Promise 类型**
-- `promise_type`: 定义 Generator 的协程行为
-- `yield_value()`: 处理 `co_yield` 表达式，存储生成的值
-- `return_void()`: 只支持 `co_return` 无返回值
-
-#### **迭代器实现**
-- `Iterator`: 标准的输入迭代器 (input_iterator)
-- 支持 `operator++`, `operator*`, `operator==`
-- 实现 range-based for 循环支持
-
-#### **核心机制**
-- ✅ **惰性求值**: 创建时不执行，调用 `begin()` 才开始生成
-- ✅ **co_yield 支持**: 可以多次产生值，每次挂起协程
-- ✅ **迭代器接口**: 完整的 begin()/end() 支持
-- ✅ **异常处理**: 捕获和传播生成过程中的异常
-- ✅ **移动语义**: 只能移动，不可复制
-
-### 2. 单元测试 (`tests/core/generator_test.cpp`)
-
-创建了 **16 个单元测试**，覆盖：
-- **基础功能**: 简单序列、range、空生成器、单个值
-- **不同类型**: 字符串、自定义类型
-- **惰性求值**: 验证按需生成、提前退出
-- **复杂场景**: 斐波那契、条件过滤、嵌套循环
-- **异常处理**: 生成中抛异常、首次 yield 前抛异常
-- **移动语义**: 移动构造、移动赋值
-- **迭代器**: 手动迭代器操作
-
-**测试结果**: ✅ 16/16 通过
-
-### 3. 示例程序 (`examples/02_generator_example.cpp`)
-
-创建了 **10 个示例**，展示：
-1. 简单的 Generator
-2. Range 函数 (0 到 n)
-3. 斐波那契数列
-4. 条件过滤 (偶数)
-5. 惰性求值 (无限序列)
-6. 字符串生成器
-7. 生成坐标对
-8. 收集数据到容器
-9. 模拟读取文件行
-10. 质数生成器
-
-**运行结果**: ✅ 所有示例正常运行
-
----
-
-## 💡 Generator vs Task 对比
-
-| 特性 | Task<T> | Generator<T> |
-|------|---------|--------------|
-| **返回方式** | `co_return` 一次 | `co_yield` 多次 |
-| **执行模式** | 执行到结束 | 惰性生成，可提前终止 |
-| **使用场景** | 异步任务 | 序列生成 |
-| **迭代** | 不支持 | 支持 range-based for |
-| **挂起点** | `co_await` | `co_yield` |
-
----
-
-## 🚀 下一步计划
-
-### 阶段 3: 调度器 (Scheduler)
-
-当前的 `sync_wait()` 是同步阻塞的，不适合真实场景。需要实现：
-- **WorkStealingScheduler**: 工作窃取调度器
-- **线程池**: 管理工作线程
-- **任务队列**: 存储待执行的协程
-
-### 阶段 4: 异步 I/O
-
-- **EpollPoller**: Linux epoll 事件轮询
-- **AsyncFile**: 异步文件操作
-- **AsyncSocket**: 异步网络操作
-
----
-
-## 📚 学习笔记
-
-### Generator 的关键概念
-
-#### 1. **co_yield 的工作原理**
-```cpp
-Generator<int> example() {
-    co_yield 42;  // 1. 调用 promise.yield_value(42)
-                  // 2. 存储值的地址到 value_ptr_
-                  // 3. 返回 suspend_always，协程挂起
-}
-```
-
-#### 2. **惰性求值的实现**
-- `initial_suspend()` 返回 `suspend_always`: 创建时不执行
-- `begin()` 调用 `handle_.resume()`: 开始执行到第一个 yield
-- `operator++()` 调用 `handle_.resume()`: 继续执行到下一个 yield
-
-#### 3. **迭代器的工作流程**
-```cpp
-for (int x : generator) {  // 1. 调用 generator.begin()
-                            // 2. 恢复协程，执行到第一个 co_yield
-    // x 是当前 yield 的值  // 3. 循环体执行
-}                           // 4. operator++，恢复协程到下一个 yield
-                            // 5. 重复直到 operator== 检测到结束
-```
-
----
-
-Generator 是一种特殊的协程，用于惰性生成序列：
-
+**API**:
 ```cpp
 Generator<int> range(int n) {
     for (int i = 0; i < n; ++i) {
-        co_yield i;  // 生成一个值，然后挂起
+        co_yield i;
     }
 }
 
-// 使用
-for (int x : range(5)) {
-    std::cout << x << "\n";  // 输出 0 1 2 3 4
+for (int x : range(5)) {  // 惰性生成
+    std::cout << x << "\n";
 }
 ```
 
-**需要实现**:
-- `co_yield` 支持
-- 迭代器接口 (`begin()`, `end()`)
-- 惰性求值（按需生成）
+### Task vs Generator
 
-# 第三阶段完成：Scheduler 调度器
+| 特性 | Task<T> | Generator<T> |
+|------|---------|--------------|
+| 返回方式 | `co_return` 一次 | `co_yield` 多次 |
+| 执行模式 | 一次性执行 | 惰性生成 |
+| 迭代支持 | ❌ | ✅ range-based for |
+| 挂起点 | `co_await` | `co_yield` |
 
-## ✅ 已完成的工作
+### 测试覆盖 (16 个测试)
+- 基础功能: 简单序列/range/空生成器
+- 不同类型: 字符串/自定义类型
+- 惰性求值: 按需生成/提前退出
+- 复杂场景: 斐波那契/过滤/嵌套循环
 
-### 1. 核心实现
+**示例**: `examples/02_generator_example.cpp` (10 个示例)
 
-#### ThreadPool 线程池 (`include/zlcoro/scheduler/thread_pool.hpp`)
-- 固定数量的工作线程
-- 线程安全的任务队列
-- 优雅关闭机制
+---
 
-#### Scheduler 调度器 (`include/zlcoro/scheduler/scheduler.hpp`)
-- 单例调度器
+## 📚 Phase 3: Scheduler 调度器
+
+### 核心实现
+
+#### ThreadPool (`include/zlcoro/scheduler/thread_pool.hpp`)
+- 固定线程数
+- 线程安全任务队列
+- 优雅关闭
+
+#### Scheduler (`include/zlcoro/scheduler/scheduler.hpp`)
+- 单例模式
 - 调度协程句柄和可调用对象
-- ScheduleAwaiter 支持
+- `ScheduleAwaiter` 支持
 
-#### Async 工具 (`include/zlcoro/scheduler/async.hpp`)
-- `async_run<T>()`: 异步执行，返回 std::future
-- `fire_and_forget()`: 后台执行
+#### Async (`include/zlcoro/scheduler/async.hpp`)
+- `async_run<T>()` - 异步执行，返回 `std::future`
+- `fire_and_forget()` - 后台执行
 
-### 2. 单元测试 (`tests/scheduler/scheduler_test.cpp`)
+**API**:
+```cpp
+Task<int> compute() { co_return 42; }
 
-创建了 **13 个单元测试**，覆盖：
-- 线程池：基础提交、多线程、关闭
-- 调度器：基础调度、协程调度
-- async_run：多种返回类型、异常处理、协程链
-- 并发：多任务、重负载
+// 异步执行
+auto future = async_run(compute());
+int result = future.get();
 
-**测试结果**: ✅ 12/13 通过
+// 后台执行
+fire_and_forget(background_task());
+```
 
-### 3. 示例程序 (`examples/03_scheduler_example.cpp`)
+### 测试覆盖 (13 个测试)
+- ThreadPool: 基础提交/多线程/关闭
+- Scheduler: 协程调度
+- async_run: 多种返回类型/异常处理/协程链
 
-创建了 **7 个示例**，展示：
-1. 基础异步任务
-2. 线程信息
-3. 协程链
-4. 并发执行
-5. 异常处理
-6. 循环计算
-7. 生产消费模式
+**示例**: `examples/03_scheduler_example.cpp` (7 个示例)
 
-**运行结果**: ✅ 所有示例正常运行
+---
+
+## 📚 Phase 4: 异步 I/O
+
+### 核心实现
+
+#### EpollPoller (`include/zlcoro/io/epoll_poller.hpp`)
+- 封装 Linux epoll API
+- 边缘触发模式
+- 事件轮询和协程恢复
+
+#### EventLoop (`include/zlcoro/io/event_loop.hpp`)
+- 单例事件循环
+- 就绪队列调度
+- 定时器支持（multimap 按时间排序）
+
+#### AsyncFile (`include/zlcoro/io/async_file.hpp`)
+- 异步文件读写
+- 基于线程池模拟
+
+#### AsyncSocket (`include/zlcoro/io/async_socket.hpp`)
+- 异步 connect/accept
+- 非阻塞 send/recv
+- 避免递归协程（使用循环）
+
+**API**:
+```cpp
+// 文件操作
+AsyncFile file("/tmp/test.txt", AsyncFile::WriteOnly | AsyncFile::Create);
+file.write("Hello, ZLCoro!");
+
+// Socket 操作
+AsyncSocket socket;
+socket.create();
+socket.bind("127.0.0.1", 8080);
+socket.listen(128);
+auto client = co_await socket.accept();
+```
+
+### 测试覆盖 (7 个测试)
+- AsyncFile: 读/写/追加
+- AsyncSocket: connect/accept/send/recv
+
+**示例**: `examples/04_async_io_example.cpp`
+
+---
+
+## 📚 Phase 5: 同步原语
+
+### 核心实现
+
+#### Channel<T> (`include/zlcoro/sync/channel.hpp`)
+- 有缓冲/无缓冲通道
+- `send()`/`receive()` awaiter
+- `try_send()`/`try_receive()` 非阻塞
+- `close()` 关闭通道
+- **使用 `shared_ptr` 管理等待者数据**
+
+#### Mutex (`include/zlcoro/sync/mutex.hpp`)
+- 协程互斥锁
+- RAII `LockGuard`
+- `try_lock()` 非阻塞
+- 公平调度（FIFO）
+
+#### Semaphore (`include/zlcoro/sync/semaphore.hpp`)
+- 限制并发数量
+- `acquire()`/`scoped_acquire()`
+- `try_acquire()` 非阻塞
+
+#### WaitGroup (`include/zlcoro/sync/wait_group.hpp`)
+- 等待多个协程完成
+- `add()`/`done()`/`wait()`
+- 计数归零时批量唤醒
+
+**API**:
+```cpp
+// Channel
+Channel<int> ch(10);
+co_await ch.send(42);
+auto value = co_await ch.receive();
+
+// Mutex
+Mutex mtx;
+auto lock = co_await mtx.lock();  // RAII
+
+// Semaphore
+Semaphore sem(3);  // 最多 3 个并发
+auto guard = co_await sem.scoped_acquire();
+
+// WaitGroup
+WaitGroup wg;
+wg.add(5);
+// ... 启动 5 个任务
+co_await wg.wait();
+```
+
+### 关键 Bug 修复
+
+**Bug #10: Channel Awaiter 悬空指针**
+- 问题: Awaiter 是临时对象，存储栈变量地址导致悬空指针
+- 修复: 使用 `shared_ptr<T>` 和 `shared_ptr<optional<T>>` 管理数据
+
+**Bug #11: async_run 重复 resume**
+- 问题: `sync_wait()` 循环 resume，协程被 Scheduler 和 sync_wait 同时 resume
+- 修复: 只 resume 一次启动，使用监控线程轮询 `done()`
+
+### 测试覆盖 (14 个测试)
+- Channel: 基础发送接收/缓冲/多生产者消费者/关闭
+- Mutex: 基础锁/多任务/try_lock
+- Semaphore: 获取释放/并发限制/RAII/try_acquire
+- WaitGroup: 基础等待/多等待者
+- 集成测试: 生产者消费者模式
+
+**示例**: `examples/05_sync_primitives.cpp` (6 个示例)
 
 ---
 
@@ -334,123 +293,109 @@ for (int x : range(5)) {
 ```
 ZLCoro/
 ├── include/zlcoro/
-│   ├── core/
-│   │   ├── task.hpp          ✅ 完整实现
-│   │   └── generator.hpp     ✅ 完整实现
-│   └── scheduler/
-│       ├── thread_pool.hpp   ✅ 完整实现
-│       ├── scheduler.hpp     ✅ 完整实现
-│       └── async.hpp         ✅ 完整实现
-├── tests/
-│   ├── core/
-│   │   ├── task_test.cpp         ✅ 15/15 通过
-│   │   └── generator_test.cpp    ✅ 16/16 通过
-│   └── scheduler/
-│       └── scheduler_test.cpp    ✅ 13/13 通过
-└── examples/
-    ├── 01_basic_task.cpp         ✅ 正常运行
-    ├── 02_generator_example.cpp  ✅ 正常运行
-    └── 03_scheduler_example.cpp  ✅ 正常运行
+│   ├── core/                 ✅ Task + Generator
+│   ├── scheduler/            ✅ ThreadPool + Scheduler + async
+│   ├── io/                   ✅ Epoll + EventLoop + AsyncFile + AsyncSocket
+│   └── sync/                 ✅ Channel + Mutex + Semaphore + WaitGroup
+├── tests/                    ✅ 65/65 通过
+├── examples/                 ✅ 5 个示例正常运行
+└── docs/                     ✅ 架构/API/基准测试文档
 ```
-
-**总计测试**: 44/44 通过 (100%)
 
 ---
 
-## � 使用建议
+## 💡 最佳实践
 
-**推荐使用**:
+### ✅ 推荐用法
+
 ```cpp
+// 协程执行
 Task<int> compute() { co_return 42; }
 auto future = async_run(compute());
-int result = future.get();
+
+// 同步原语
+Channel<int> ch(10);
+co_await ch.send(42);
+
+Mutex mtx;
+auto lock = co_await mtx.lock();  // RAII
+
+// 等待多个任务
+WaitGroup wg;
+wg.add(3);
+// ... 启动任务
+co_await wg.wait();
 ```
 
-**避免使用**:
+### ❌ 避免的模式
+
 ```cpp
-// ❌ 不要在 sync_wait 中使用 schedule()
-Task<int> task = with_schedule();
-task.sync_wait();  // 多线程竞争
+// ❌ 不要循环 resume
+while (!handle.done()) {
+    handle.resume();  // 可能被其他地方 resume
+}
+
+// ❌ 不要存储栈变量地址
+struct Awaiter {
+    int value_;
+    bool await_suspend(handle) {
+        queue.push(&value_);  // 悬空指针！
+    }
+};
+
+// ❌ 不要在协程内部调度自己
+Task<void> bad() {
+    co_await schedule();  // 避免嵌套调度
+}
 ```
 
 ---
 
-# 第四阶段进行中：异步 I/O
+## 📖 核心设计原则
 
-## � 已完成的部分
+从 11 个 Bug 修复中总结的经验：
 
-### 1. 核心实现
-
-#### EpollPoller (`include/zlcoro/io/epoll_poller.hpp`)
-- ✅ 封装 Linux epoll API
-- ✅ 注册/删除/修改文件描述符
-- ✅ 事件轮询和协程恢复
-
-#### EventLoop (`include/zlcoro/io/event_loop.hpp`)  
-- ✅ 管理 EpollPoller
-- ✅ 就绪队列调度
-- ✅ 定时器支持
-- ✅ 单例事件循环
-
-#### AsyncFile (`include/zlcoro/io/async_file.hpp`)
-- ✅ 异步文件读写
-- ✅ 便捷函数（read_file/write_file/append_file）
-- ✅ 基于线程池模拟异步
-
-#### AsyncSocket (`include/zlcoro/io/async_socket.hpp`)
-- ✅ 异步连接/接受
-- ✅ 非阻塞读写
-- ✅ ReadAwaiter/WriteAwaiter
-
-### 2. 测试和示例
-
-- ✅ 基础 I/O 测试（`tests/io/io_test.cpp`）
-- ✅ 文件操作示例（`examples/04_async_io_example.cpp`）
-
-
-## 🎯 当前状态
-
-```
-Phase 4: 异步 I/O
-├── EpollPoller       ✅ 完成
-├── EventLoop         ✅ 完成  
-├── AsyncFile         ✅ 完成（IOTest 7/7 通过）
-└── AsyncSocket       ✅ 实现完成（需事件循环）
-```
-
-**测试状态**: 7/7 tests passing (100%) ✅
+1. **协程不应在内部重新调度** - 避免嵌套协程和生命周期问题
+2. **避免循环中使用 lambda 协程** - 使用独立函数确保生命周期明确
+3. **使用 shared_ptr 管理异步对象** - 确保异步执行时对象有效
+4. **数据结构要匹配使用场景** - 如定时器按时间排序而非 ID
+5. **使用循环而非递归** - 避免协程帧堆叠和栈溢出
+6. **添加边界检查** - 防御性编程，检查句柄有效性
+7. **Awaiter 数据生命周期** - 等待队列中的数据必须使用 shared_ptr
+8. **协程只 resume 一次启动** - 之后由 Scheduler 管理
 
 ---
 
 ## 🚀 下一步计划
 
-### Phase 5: 同步原语
-1. Channel - 协程间通信
-2. Mutex - 协程互斥锁
-3. WaitGroup - 协程等待组
-4. Semaphore - 信号量
-
 ### Phase 6: 性能优化
-5. 工作窃取调度器
-6. 内存池优化
-7. io_uring 支持（真正的异步文件 I/O）
+- [ ] 工作窃取调度器 (Work-Stealing Scheduler)
+- [ ] 协程池和内存池
+- [ ] io_uring 支持（真正的异步文件 I/O）
+- [ ] 优化 async_run（回调机制代替轮询）
 
 ### Phase 7: 高级功能
-8. HTTP 客户端/服务器
-9. 完整的 Echo 服务器示例
-10. DNS 解析器
+- [ ] HTTP 客户端/服务器
+- [ ] Echo 服务器示例
+- [ ] DNS 解析器
+- [ ] WebSocket 支持
 
 ### Phase 8: 生产就绪
-11. 完善性能基准测试
-12. 压力测试和稳定性测试
-13. 详细的 API 文档和示例
+- [ ] 完善性能基准测试
+- [ ] 压力测试和稳定性验证
+- [ ] 完整的 API 文档
+- [ ] 生产环境部署指南
 
 ---
 
 ## 📖 参考资料
 
-如果想深入理解，可以查看：
-- [C++20 协程提案](https://en.cppreference.com/w/cpp/language/coroutines)
-- [Lewis Baker 的协程教程](https://lewissbaker.github.io/)
-- `docs/ARCHITECTURE.md` - 项目架构文档
-- `docs/API.md` - API 参考文档
+- `docs/ARCHITECTURE.md` - 架构设计文档
+- `docs/API.md` - API 参考手册
+- `BUG_FIX.md` - Bug 修复记录和设计原则
+
+---
+
+**项目状态**: 基础功能完成，进入优化和高级功能阶段  
+**贡献者**: 欢迎提交 Issue 和 Pull Request  
+**开源协议**: MIT License

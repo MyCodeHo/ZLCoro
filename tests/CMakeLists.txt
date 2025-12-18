@@ -58,3 +58,13 @@ target_link_libraries(io_test PRIVATE
     pthread
 )
 add_test(NAME IOTest COMMAND io_test)
+
+# Sync 测试
+add_executable(sync_test sync/sync_test.cpp)
+target_link_libraries(sync_test PRIVATE 
+    ZLCoro::zlcoro
+    GTest::gtest
+    GTest::gtest_main
+    pthread
+)
+add_test(NAME SyncTest COMMAND sync_test)

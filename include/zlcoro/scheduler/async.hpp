@@ -5,6 +5,10 @@
 #include <future>
 #include <memory>
 #include <functional>
+#include <mutex>
+#include <condition_variable>
+#include <thread>
+#include <atomic>
 
 namespace zlcoro {
 
@@ -25,11 +29,14 @@ namespace zlcoro {
 
 template <typename T>
 std::future<T> async_run(Task<T> task) {
-    // 使用 shared_ptr 包装状态
+    // 使用 shared_ptr 管理状态和 Task
     struct State {
         Task<T> task;
         std::promise<T> promise;
-        std::atomic<bool> executed{false};
+        std::mutex mutex;
+        std::condition_variable cv;
+        std::atomic<bool> started{false};
+        std::atomic<bool> completed{false};
         
         explicit State(Task<T>&& t) : task(std::move(t)) {}
     };
@@ -37,34 +44,74 @@ std::future<T> async_run(Task<T> task) {
     auto state = std::make_shared<State>(std::move(task));
     auto future = state->promise.get_future();
     
-    // 创建runner - 使用lambda按值捕获shared_ptr
-    auto runner = [state]() {
-        // 确保只执行一次，额外的保护机制
-        bool expected = false;
-        if (!state->executed.compare_exchange_strong(expected, true)) {
-            return;  // 已经被执行过了
+    // 提交启动任务到调度器
+    Scheduler::instance().schedule([state]() {
+        auto handle = state->task.handle();
+        
+        // 标记已启动
+        state->started.store(true);
+        state->cv.notify_all();
+        
+        // 只启动一次协程
+        if (!handle.done()) {
+            handle.resume();
         }
         
-        try {
-            // 使用 sync_wait 执行协程
-            if constexpr (std::is_void_v<T>) {
-                state->task.sync_wait();
-                state->promise.set_value();
-            } else {
-                T result = state->task.sync_wait();
-                state->promise.set_value(std::move(result));
-            }
-        } catch (...) {
+        // 检查是否立即完成
+        if (handle.done()) {
             try {
-                state->promise.set_exception(std::current_exception());
+                if constexpr (std::is_void_v<T>) {
+                    handle.promise().result();
+                    state->promise.set_value();
+                } else {
+                    state->promise.set_value(std::move(handle.promise()).result());
+                }
             } catch (...) {
-                // 忽略
+                try {
+                    state->promise.set_exception(std::current_exception());
+                } catch (...) {}
+            }
+            state->completed.store(true);
+            state->cv.notify_all();
+        }
+    });
+    
+    // 启动一个监控线程，等待协程完成
+    std::thread([state]() {
+        // 等待协程启动
+        {
+            std::unique_lock<std::mutex> lock(state->mutex);
+            state->cv.wait(lock, [&] { return state->started.load(); });
+        }
+        
+        // 如果已经完成，直接返回
+        if (state->completed.load()) {
+            return;
+        }
+        
+        auto handle = state->task.handle();
+        
+        // 轮询等待协程完成
+        while (!handle.done()) {
+            std::this_thread::sleep_for(std::chrono::microseconds(50));
+        }
+        
+        // 如果还没设置结果，设置它
+        if (!state->completed.exchange(true)) {
+            try {
+                if constexpr (std::is_void_v<T>) {
+                    handle.promise().result();
+                    state->promise.set_value();
+                } else {
+                    state->promise.set_value(std::move(handle.promise()).result());
+                }
+            } catch (...) {
+                try {
+                    state->promise.set_exception(std::current_exception());
+                } catch (...) {}
             }
         }
-    };
-    
-    // 提交到调度器
-    Scheduler::instance().schedule(std::move(runner));
+    }).detach();
     
     return future;
 }
@@ -88,18 +135,14 @@ inline void fire_and_forget(Task<void> task) {
     // 使用 shared_ptr 管理 Task 的生命周期
     auto task_ptr = std::make_shared<Task<void>>(std::move(task));
     
-    std::function<void()> runner = [task_ptr]() {
-        try {
-            auto handle = task_ptr->handle();
-            while (!handle.done()) {
-                handle.resume();
-            }
-        } catch (...) {
-            // 忽略异常
+    // 只启动一次协程，之后协程会通过 Scheduler 自己继续执行
+    Scheduler::instance().schedule([task_ptr]() {
+        auto handle = task_ptr->handle();
+        if (!handle.done()) {
+            handle.resume();
         }
-    };
-    
-    Scheduler::instance().schedule(std::move(runner));
+        // 协程会自己继续运行，task_ptr 保持它的生命周期
+    });
 }
 
 } // namespace zlcoro

@@ -72,6 +72,29 @@
 
 ---
 
+## Bug #10: Channel Awaiter 悬空指针问题
+
+**问题**: `SendAwaiter` 和 `ReceiveAwaiter` 将成员变量地址存入等待队列，但 Awaiter 是临时对象，协程挂起后 Awaiter 可能被销毁，导致悬空指针。
+
+**修复方案**: 使用 `shared_ptr` 管理等待者的数据：
+- `SendWaiter` 使用 `std::shared_ptr<T>` 存储值
+- `RecvWaiter` 使用 `std::shared_ptr<std::optional<T>>` 存储结果
+
+---
+
+## Bug #11: async_run 重复 resume 协程
+
+**问题**: `async_run` 内部使用 `sync_wait()` 循环调用 `resume()`，当协程被 Channel/Mutex 等同步原语唤醒时，会导致同一协程被多次 resume，引发未定义行为。
+
+**症状**: 协程被执行多次，`optional` 显示先为空后有值，最终段错误。
+
+**修复方案**: 
+1. `async_run` 只调用一次 `resume()` 启动协程
+2. 使用监控线程轮询 `handle.done()` 等待协程完成
+3. 协程由 Scheduler 负责后续调度，不再由 `sync_wait` 循环 resume
+
+---
+
 ## 核心设计原则
 
 1. **协程不应在内部重新调度** - 避免嵌套协程和生命周期问题
@@ -80,3 +103,5 @@
 4. **数据结构要匹配使用场景** - 排序依据要和查找逻辑一致
 5. **使用循环而非递归** - 避免协程帧堆叠和栈溢出
 6. **添加边界检查** - 防御性编程
+7. **Awaiter 数据生命周期** - 等待队列中的数据必须使用 shared_ptr 管理，因为 Awaiter 是临时对象
+8. **协程只 resume 一次** - 启动后由 Scheduler 管理，不要循环 resume

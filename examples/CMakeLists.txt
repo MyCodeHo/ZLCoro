@@ -22,9 +22,9 @@ target_link_libraries(04_async_io_example PRIVATE
     pthread
 )
 
-# 简单测试
-add_executable(simple_io_test simple_io_test.cpp)
-target_link_libraries(simple_io_test PRIVATE 
+# 示例 5: 同步原语
+add_executable(05_sync_primitives 05_sync_primitives.cpp)
+target_link_libraries(05_sync_primitives PRIVATE 
     ZLCoro::zlcoro
     pthread
 )
