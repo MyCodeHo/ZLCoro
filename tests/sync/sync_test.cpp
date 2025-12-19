@@ -345,6 +345,13 @@ TEST(IntegrationTest, ProducerConsumerWithSemaphore) {
         co_return;
     };
     
+    // 定义等待协程，避免 lambda 生命周期问题
+    auto waiter = [&]() -> Task<void> {
+        co_await wg.wait();
+        ch.close();
+        co_return;
+    };
+    
     wg.add(5);
     
     // 启动生产者
@@ -356,11 +363,7 @@ TEST(IntegrationTest, ProducerConsumerWithSemaphore) {
     auto consumer_future = async_run(consumer());
     
     // 等待所有生产者完成
-    auto wait_future = async_run([&]() -> Task<void> {
-        co_await wg.wait();
-        ch.close();
-        co_return;
-    }());
+    auto wait_future = async_run(waiter());
     
     wait_future.get();
     consumer_future.get();

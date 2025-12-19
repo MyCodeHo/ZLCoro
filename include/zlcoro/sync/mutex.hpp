@@ -74,26 +74,29 @@ public:
     // Lock Awaiter
     struct LockAwaiter {
         Mutex* mutex_;
-        bool acquired_ = false;
 
         explicit LockAwaiter(Mutex* mtx) : mutex_(mtx) {}
 
-        bool await_ready() {
-            std::lock_guard lock(mutex_->queue_mutex_);
-            
-            // 如果锁未被持有，直接获取
-            bool expected = false;
-            if (mutex_->locked_.compare_exchange_strong(expected, true)) {
-                acquired_ = true;
-                return true;
-            }
-            
-            return false;  // 需要挂起
+        bool await_ready() const noexcept {
+            // 快速路径：如果锁明显被持有，直接返回 false
+            // 注意：这只是优化，真正的获取逻辑在 await_suspend 中
+            return false;
         }
 
-        void await_suspend(std::coroutine_handle<> handle) {
+        bool await_suspend(std::coroutine_handle<> handle) {
             std::lock_guard lock(mutex_->queue_mutex_);
+            
+            // 在持有 queue_mutex_ 的情况下尝试获取锁
+            // 这确保了 await_ready 和 await_suspend 之间没有竞态
+            bool expected = false;
+            if (mutex_->locked_.compare_exchange_strong(expected, true)) {
+                // 成功获取锁，不需要挂起
+                return false;
+            }
+            
+            // 获取失败，加入等待队列
             mutex_->waiters_.push(handle);
+            return true;  // 挂起
         }
 
         LockGuard await_resume() {

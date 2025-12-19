@@ -181,10 +181,9 @@ public:
     }
 
     // 异步接受连接
+    // 注意：使用"先尝试后等待"模式，避免边缘触发模式下的事件丢失
     Task<AsyncSocket> accept() {
         while (true) {
-            co_await ReadAwaiter{fd_, event_loop_};
-            
             sockaddr_in addr{};
             socklen_t len = sizeof(addr);
             
@@ -192,7 +191,8 @@ public:
             
             if (client_fd == -1) {
                 if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                    // 没有连接可接受，继续循环等待
+                    // 没有连接可接受，等待可读事件
+                    co_await ReadAwaiter{fd_, event_loop_};
                     continue;
                 }
                 throw std::runtime_error(
@@ -204,18 +204,19 @@ public:
     }
 
     // 异步读取
+    // 注意：使用"先尝试后等待"模式，避免边缘触发模式下的事件丢失
     Task<std::string> read(size_t max_len = 4096) {
         std::string buffer;
         buffer.resize(max_len);
         
         while (true) {
-            co_await ReadAwaiter{fd_, event_loop_};
-            
+            // 先尝试读取（避免边缘触发模式下事件丢失）
             ssize_t n = ::read(fd_, buffer.data(), max_len);
             
             if (n == -1) {
                 if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                    // 没有数据，继续循环等待
+                    // 没有数据，等待可读事件
+                    co_await ReadAwaiter{fd_, event_loop_};
                     continue;
                 }
                 throw std::runtime_error(

@@ -38,6 +38,7 @@ private:
     struct SendWaiter {
         std::coroutine_handle<> handle;
         std::shared_ptr<T> value;  // 使用 shared_ptr 存储值
+        std::shared_ptr<bool> success;  // 标记发送是否成功
     };
     
     struct RecvWaiter {
@@ -50,9 +51,12 @@ public:
     struct SendAwaiter {
         Channel* ch_;
         std::shared_ptr<T> value_;  // 使用 shared_ptr 确保生命周期
+        std::shared_ptr<bool> success_;  // 标记发送是否成功
 
         SendAwaiter(Channel* ch, T val) 
-            : ch_(ch), value_(std::make_shared<T>(std::move(val))) {}
+            : ch_(ch), 
+              value_(std::make_shared<T>(std::move(val))),
+              success_(std::make_shared<bool>(false)) {}
 
         bool await_ready() { return false; }
 
@@ -60,7 +64,7 @@ public:
             std::unique_lock lock(ch_->mutex_);
             
             if (ch_->closed_) {
-                return false;  // 不挂起，抛异常
+                return false;  // 不挂起，在 await_resume 中抛异常
             }
 
             // 1. 检查是否有接收者在等待
@@ -68,6 +72,7 @@ public:
                 RecvWaiter waiter = ch_->recv_waiters_.front();
                 ch_->recv_waiters_.pop();
                 *(waiter.result) = std::move(*value_);
+                *success_ = true;  // 标记发送成功
                 
                 lock.unlock();
                 if (waiter.handle && !waiter.handle.done()) {
@@ -79,16 +84,18 @@ public:
             // 2. 尝试放入缓冲区
             if (ch_->buffer_.size() < ch_->capacity_) {
                 ch_->buffer_.push(std::move(*value_));
+                *success_ = true;  // 标记发送成功
                 return false;  // 不挂起
             }
 
             // 3. 挂起并加入等待队列（使用 shared_ptr，生命周期安全）
-            ch_->send_waiters_.push({handle, value_});
+            ch_->send_waiters_.push({handle, value_, success_});
             return true;  // 挂起
         }
 
         void await_resume() {
-            if (ch_->closed_) {
+            // 只有在发送失败（被 close 唤醒）时才抛异常
+            if (!*success_ && ch_->closed_) {
                 throw std::runtime_error("Channel is closed");
             }
         }
@@ -117,6 +124,7 @@ public:
                     SendWaiter waiter = ch_->send_waiters_.front();
                     ch_->send_waiters_.pop();
                     ch_->buffer_.push(std::move(*waiter.value));
+                    *(waiter.success) = true;  // 标记发送成功
                     
                     lock.unlock();
                     if (waiter.handle && !waiter.handle.done()) {
@@ -131,6 +139,7 @@ public:
                 SendWaiter waiter = ch_->send_waiters_.front();
                 ch_->send_waiters_.pop();
                 *result_ = std::move(*waiter.value);
+                *(waiter.success) = true;  // 标记发送成功
                 
                 lock.unlock();
                 if (waiter.handle && !waiter.handle.done()) {
@@ -195,6 +204,7 @@ public:
     std::optional<T> try_receive() {
         std::coroutine_handle<> to_resume;
         std::optional<T> result;
+        std::shared_ptr<bool> sender_success;
         
         {
             std::lock_guard lock(mutex_);
@@ -207,12 +217,14 @@ public:
                     SendWaiter waiter = send_waiters_.front();
                     send_waiters_.pop();
                     buffer_.push(std::move(*waiter.value));
+                    *(waiter.success) = true;  // 标记发送成功
                     to_resume = waiter.handle;
                 }
             } else if (!send_waiters_.empty()) {
                 SendWaiter waiter = send_waiters_.front();
                 send_waiters_.pop();
                 result = std::move(*waiter.value);
+                *(waiter.success) = true;  // 标记发送成功
                 to_resume = waiter.handle;
             }
         }
@@ -224,7 +236,8 @@ public:
     }
 
     void close() {
-        std::queue<RecvWaiter> waiters_copy;
+        std::queue<RecvWaiter> recv_waiters_copy;
+        std::queue<SendWaiter> send_waiters_copy;
         
         {
             std::lock_guard lock(mutex_);
@@ -234,17 +247,30 @@ public:
             }
             
             closed_ = true;
-            waiters_copy = recv_waiters_;
-            while (!recv_waiters_.empty()) {
-                recv_waiters_.pop();
+            
+            // 复制等待者队列
+            recv_waiters_copy = std::move(recv_waiters_);
+            send_waiters_copy = std::move(send_waiters_);
+            
+            // 清空原队列
+            while (!recv_waiters_.empty()) recv_waiters_.pop();
+            while (!send_waiters_.empty()) send_waiters_.pop();
+        }
+        
+        // 唤醒所有等待接收者，返回 nullopt
+        while (!recv_waiters_copy.empty()) {
+            auto waiter = recv_waiters_copy.front();
+            recv_waiters_copy.pop();
+            *(waiter.result) = std::nullopt;
+            if (waiter.handle && !waiter.handle.done()) {
+                Scheduler::instance().schedule(waiter.handle);
             }
         }
         
-        // 设置所有等待接收者的结果为 nullopt，然后调度
-        while (!waiters_copy.empty()) {
-            auto waiter = waiters_copy.front();
-            waiters_copy.pop();
-            *(waiter.result) = std::nullopt;  // 通道关闭，返回空值
+        // 唤醒所有等待发送者（它们会在 await_resume 中抛出异常）
+        while (!send_waiters_copy.empty()) {
+            auto waiter = send_waiters_copy.front();
+            send_waiters_copy.pop();
             if (waiter.handle && !waiter.handle.done()) {
                 Scheduler::instance().schedule(waiter.handle);
             }

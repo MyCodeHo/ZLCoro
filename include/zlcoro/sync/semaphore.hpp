@@ -80,25 +80,26 @@ public:
     // Acquire Awaiter
     struct AcquireAwaiter {
         Semaphore* sem_;
-        bool acquired_ = false;
 
         explicit AcquireAwaiter(Semaphore* sem) : sem_(sem) {}
 
-        bool await_ready() {
-            std::lock_guard lock(sem_->mutex_);
-            
-            if (sem_->count_ > 0) {
-                sem_->count_--;
-                acquired_ = true;
-                return true;
-            }
-            
-            return false;  // 需要挂起
+        bool await_ready() const noexcept {
+            // 快速路径优化，真正的获取逻辑在 await_suspend 中
+            return false;
         }
 
-        void await_suspend(std::coroutine_handle<> handle) {
+        bool await_suspend(std::coroutine_handle<> handle) {
             std::lock_guard lock(sem_->mutex_);
+            
+            // 在持有锁的情况下尝试获取许可
+            if (sem_->count_ > 0) {
+                sem_->count_--;
+                return false;  // 成功获取，不挂起
+            }
+            
+            // 获取失败，加入等待队列
             sem_->waiters_.push(handle);
+            return true;  // 挂起
         }
 
         void await_resume() {}
@@ -110,20 +111,21 @@ public:
 
         explicit ScopedAcquireAwaiter(Semaphore* sem) : sem_(sem) {}
 
-        bool await_ready() {
+        bool await_ready() const noexcept {
+            // 快速路径优化
+            return false;
+        }
+
+        bool await_suspend(std::coroutine_handle<> handle) {
             std::lock_guard lock(sem_->mutex_);
             
             if (sem_->count_ > 0) {
                 sem_->count_--;
-                return true;
+                return false;  // 成功获取，不挂起
             }
             
-            return false;
-        }
-
-        void await_suspend(std::coroutine_handle<> handle) {
-            std::lock_guard lock(sem_->mutex_);
             sem_->waiters_.push(handle);
+            return true;  // 挂起
         }
 
         Guard await_resume() {

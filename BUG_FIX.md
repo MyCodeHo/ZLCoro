@@ -1,107 +1,79 @@
 # ZLCoro Bug 修复记录
 
-## Bug #1: Generator 右值生命周期问题
+## 1. Awaiter 悬空指针
 
-**问题**: `co_yield` 右值时只存储地址，临时对象销毁后导致悬空指针。
+**问题**: Awaiter 是临时对象，将成员变量地址存入等待队列后，协程挂起时 Awaiter 已销毁。
 
-**修复方案**: 区分左值和右值，右值移动到 Promise 存储。
-
----
-
-## Bug #2: 右值到左值切换时的资源泄漏
-
-**问题**: 先 yield 右值后 yield 左值时，`stored_value_` 中的对象未析构。
-
-**修复方案**: 在 yield 左值时检查并清理之前的右值。
+**方案**: 使用 `shared_ptr` 管理等待队列中的数据。
 
 ---
 
-## Bug #3: 协程生命周期管理问题
+## 2. await_ready/await_suspend 竞态
 
-**问题**: Task 移动后，原始句柄仍被 `async_run` 使用，导致悬空指针。
+**问题**: `await_ready()` 返回 `false` 后、`await_suspend()` 调用前，锁可能被其他线程释放，导致死锁。
 
-**修复方案**: 使用 `shared_ptr` 延长 Task 生命周期。
-
----
-
-## Bug #4: IOTest heap-use-after-free
-
-**问题**: AsyncFile 方法返回 Task 并在内部使用 `co_await schedule()`，导致嵌套协程生命周期问题。
-
-**修复方案**: 将 AsyncFile 方法改为同步函数，由调用者统一管理协程调度。
+**方案**: 获取逻辑全部移到 `await_suspend()`，返回 `bool` 决定是否挂起。
 
 ---
 
-## Bug #5: SchedulerTest stack-use-after-scope
+## 3. Lambda 协程生命周期
 
-**问题**: Lambda 协程在循环中创建，lambda 对象在栈上，生命周期结束后协程仍在执行。
+**问题**: 临时 lambda 创建的协程帧会引用已销毁的捕获变量。
 
-**修复方案**: 使用独立的协程函数，避免循环中使用 lambda。
+**方案**: Lambda 协程必须赋值给命名变量，或改用独立函数 + `shared_ptr` 传参。
 
----
+```cpp
+// 错误
+async_run([&]() -> Task<void> { co_await wg.wait(); }());
 
-## Bug #6: EventLoop 定时器排序错误
-
-**问题**: 定时器按 TimerId 排序，但 `process_timers()` 错误地假设第一个元素是最早到期的。
-
-**修复方案**: 使用 `std::multimap<time_point, ...>` 按到期时间排序。
-
----
-
-## Bug #7: AsyncSocket 递归协程导致栈帧堆叠
-
-**问题**: `accept()` 遇到 `EAGAIN` 时使用 `co_return co_await accept()` 递归调用，导致协程帧堆叠。
-
-**修复方案**: 使用 `while(true)` 循环代替递归，复用同一协程帧。
+// 正确
+auto waiter = [&]() -> Task<void> { co_await wg.wait(); co_return; };
+async_run(waiter());
+```
 
 ---
 
-## Bug #8: EpollPoller 重复添加协程
+## 4. async_run 重复 resume
 
-**问题**: 文件描述符同时触发多个事件时，同一个协程被添加两次导致崩溃。
+**问题**: 循环调用 `resume()` 会与同步原语的唤醒冲突，导致同一协程被多次 resume。
 
-**修复方案**: 使用标志位确保每个 fd 只添加一次协程。
-
----
-
-## Bug #9: Generator 迭代器安全性问题
-
-**问题**: Generator 迭代器缺少边界检查，可能导致访问无效句柄。
-
-**修复方案**: 在 `operator++` 和 `operator*` 中添加有效性检查。
+**方案**: 只调用一次 `resume()` 启动协程，后续由 Scheduler 管理。
 
 ---
 
-## Bug #10: Channel Awaiter 悬空指针问题
+## 5. 协程递归导致帧堆叠
 
-**问题**: `SendAwaiter` 和 `ReceiveAwaiter` 将成员变量地址存入等待队列，但 Awaiter 是临时对象，协程挂起后 Awaiter 可能被销毁，导致悬空指针。
+**问题**: `co_return co_await func()` 递归调用会堆叠协程帧。
 
-**修复方案**: 使用 `shared_ptr` 管理等待者的数据：
-- `SendWaiter` 使用 `std::shared_ptr<T>` 存储值
-- `RecvWaiter` 使用 `std::shared_ptr<std::optional<T>>` 存储结果
+**方案**: 使用 `while(true)` 循环代替递归。
 
 ---
 
-## Bug #11: async_run 重复 resume 协程
+## 6. 边缘触发模式事件丢失
 
-**问题**: `async_run` 内部使用 `sync_wait()` 循环调用 `resume()`，当协程被 Channel/Mutex 等同步原语唤醒时，会导致同一协程被多次 resume，引发未定义行为。
+**问题**: "先等待后尝试"模式下，数据在注册 epoll 前到达，边缘触发不会再次通知。
 
-**症状**: 协程被执行多次，`optional` 显示先为空后有值，最终段错误。
+**方案**: 改用"先尝试后等待"，只有 EAGAIN 才等待事件。
 
-**修复方案**: 
-1. `async_run` 只调用一次 `resume()` 启动协程
-2. 使用监控线程轮询 `handle.done()` 等待协程完成
-3. 协程由 Scheduler 负责后续调度，不再由 `sync_wait` 循环 resume
+```cpp
+// 错误
+co_await ReadAwaiter{...};
+ssize_t n = ::read(...);
+
+// 正确
+ssize_t n = ::read(...);
+if (n == -1 && errno == EAGAIN) {
+    co_await ReadAwaiter{...};
+}
+```
 
 ---
 
-## 核心设计原则
+## 核心原则
 
-1. **协程不应在内部重新调度** - 避免嵌套协程和生命周期问题
-2. **避免循环中使用 lambda** - 使用独立函数确保生命周期明确
-3. **使用 shared_ptr 管理异步对象** - 确保异步执行时对象有效
-4. **数据结构要匹配使用场景** - 排序依据要和查找逻辑一致
-5. **使用循环而非递归** - 避免协程帧堆叠和栈溢出
-6. **添加边界检查** - 防御性编程
-7. **Awaiter 数据生命周期** - 等待队列中的数据必须使用 shared_ptr 管理，因为 Awaiter 是临时对象
-8. **协程只 resume 一次** - 启动后由 Scheduler 管理，不要循环 resume
+1. **Awaiter 数据用 shared_ptr** - 临时对象不能存地址
+2. **获取逻辑在 await_suspend** - 避免竞态窗口
+3. **Lambda 协程要命名** - 确保生命周期
+4. **协程只 resume 一次** - 后续由调度器管理
+5. **循环代替递归** - 避免帧堆叠
+6. **先尝试后等待** - 边缘触发模式必须
