@@ -68,3 +68,13 @@ target_link_libraries(sync_test PRIVATE
     pthread
 )
 add_test(NAME SyncTest COMMAND sync_test)
+
+# Performance 测试（Phase 6: 性能优化）
+add_executable(performance_test scheduler/performance_test.cpp)
+target_link_libraries(performance_test PRIVATE 
+    ZLCoro::zlcoro
+    GTest::gtest
+    GTest::gtest_main
+    pthread
+)
+add_test(NAME PerformanceTest COMMAND performance_test)

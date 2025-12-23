@@ -80,7 +80,8 @@
         "complex": "cpp",
         "list": "cpp",
         "iomanip": "cpp",
-        "typeindex": "cpp"
+        "typeindex": "cpp",
+        "fstream": "cpp"
     },
     "C_Cpp.errorSquiggles": "enabled",
     "C_Cpp.intelliSenseEngine": "default"

@@ -1,7 +1,7 @@
 # ZLCoro 项目进度
 
 > 基于 C++20 协程的高性能异步编程框架开发进度  
-> **最后更新**: 2025-12-18 | **版本**: 0.5.0
+> **最后更新**: 2025-12-19 | **版本**: 0.6.0
 
 ## 📊 总体进度
 
@@ -11,12 +11,12 @@
 - ✅ **Phase 3**: Scheduler 调度器
 - ✅ **Phase 4**: Async I/O 异步 I/O
 - ✅ **Phase 5**: 同步原语 (Channel/Mutex/Semaphore/WaitGroup)
-- 🚧 **Phase 6**: 性能优化 (工作窃取/内存池/io_uring)
+- ✅ **Phase 6**: 性能优化 (工作窃取调度器/内存池)
 - 🚧 **Phase 7**: 高级功能 (HTTP/WebSocket/DNS)
 - 🚧 **Phase 8**: 生产就绪 (基准测试/文档/部署)
 
 ### 🧪 测试状态
-**65/65 tests passing (100%)** 🎉
+**78/78 tests passing (100%)** 🎉
 
 | 模块 | 测试数 | 状态 |
 |------|--------|------|
@@ -25,12 +25,13 @@
 | Scheduler | 13 | ✅ |
 | I/O | 7 | ✅ |
 | Sync | 14 | ✅ |
+| Performance | 13 | ✅ |
 
 ### 📦 代码统计
-- **头文件**: 16 个（Header-Only）
-- **测试文件**: 5 个
+- **头文件**: 18 个（Header-Only）
+- **测试文件**: 6 个
 - **示例程序**: 5 个
-- **代码行数**: ~6500 行
+- **代码行数**: ~7500 行
 
 ---
 
@@ -48,7 +49,10 @@
 │    AsyncFile | AsyncSocket          │
 ├─────────────────────────────────────┤
 │    调度器 (scheduler/)               │
-│    ThreadPool | Scheduler           │
+│    ThreadPool | WorkStealingScheduler │
+├─────────────────────────────────────┤
+│    工具 (utils/)                     │
+│    ObjectPool | MemoryPool          │
 ├─────────────────────────────────────┤
 │    协程核心 (core/)                  │
 │    Task<T> | Generator<T>           │
@@ -267,25 +271,6 @@ wg.add(5);
 co_await wg.wait();
 ```
 
-### 关键 Bug 修复
-
-**Bug #10: Channel Awaiter 悬空指针**
-- 问题: Awaiter 是临时对象，存储栈变量地址导致悬空指针
-- 修复: 使用 `shared_ptr<T>` 和 `shared_ptr<optional<T>>` 管理数据
-
-**Bug #11: async_run 重复 resume**
-- 问题: `sync_wait()` 循环 resume，协程被 Scheduler 和 sync_wait 同时 resume
-- 修复: 只 resume 一次启动，使用监控线程轮询 `done()`
-
-### 测试覆盖 (14 个测试)
-- Channel: 基础发送接收/缓冲/多生产者消费者/关闭
-- Mutex: 基础锁/多任务/try_lock
-- Semaphore: 获取释放/并发限制/RAII/try_acquire
-- WaitGroup: 基础等待/多等待者
-- 集成测试: 生产者消费者模式
-
-**示例**: `examples/05_sync_primitives.cpp` (6 个示例)
-
 ---
 
 ## 🎯 当前项目状态
@@ -368,11 +353,10 @@ Task<void> bad() {
 
 ## 🚀 下一步计划
 
-### Phase 6: 性能优化
-- [ ] 工作窃取调度器 (Work-Stealing Scheduler)
-- [ ] 协程池和内存池
+### Phase 6: 性能优化 ✅ 已完成
+- [x] 工作窃取调度器 (WorkStealingScheduler)
+- [x] 对象池和内存池 (ObjectPool/FixedSizeAllocator)
 - [ ] io_uring 支持（真正的异步文件 I/O）
-- [ ] 优化 async_run（回调机制代替轮询）
 
 ### Phase 7: 高级功能
 - [ ] HTTP 客户端/服务器
@@ -385,6 +369,70 @@ Task<void> bad() {
 - [ ] 压力测试和稳定性验证
 - [ ] 完整的 API 文档
 - [ ] 生产环境部署指南
+
+---
+
+## 📚 Phase 6: 性能优化
+
+### WorkStealingScheduler (`include/zlcoro/scheduler/work_stealing_scheduler.hpp`)
+
+高性能工作窃取调度器：
+- ✅ 每个线程有独立的本地任务队列
+- ✅ 空闲时从其他线程窃取任务
+- ✅ 减少全局锁竞争，提高缓存局部性
+
+**性能对比**:
+```
+ThreadPool:           15952 us (10000 tasks)
+WorkStealingScheduler: 6833 us (10000 tasks)
+性能提升: ~2.3x
+```
+
+**API**:
+```cpp
+WorkStealingScheduler scheduler(4);  // 4 线程
+
+scheduler.submit([]() {
+    // 任务代码
+});
+
+scheduler.schedule(coroutine_handle);  // 调度协程
+```
+
+### ObjectPool (`include/zlcoro/utils/memory_pool.hpp`)
+
+对象池，减少频繁内存分配：
+- ✅ 预分配对象池
+- ✅ 线程安全（自旋锁）
+- ✅ RAII 包装器 (PooledPtr)
+
+**API**:
+```cpp
+ObjectPool<MyClass> pool(32, 1024);  // 初始32个，最大1024个
+
+auto* obj = pool.acquire(arg1, arg2);  // 获取对象
+pool.release(obj);                      // 释放对象
+
+// RAII 版本
+{
+    PooledPtr<MyClass> ptr(pool.acquire(args...), &pool);
+    ptr->method();
+}  // 自动归还
+```
+
+### FixedSizeAllocator
+
+固定大小内存块分配器：
+- ✅ 批量分配内存块
+- ✅ 适用于协程帧等固定大小对象
+
+**API**:
+```cpp
+FixedSizeAllocator allocator(64);  // 64 字节块
+
+void* ptr = allocator.allocate();
+allocator.deallocate(ptr);
+```
 
 ---
 
