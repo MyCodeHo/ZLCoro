@@ -78,3 +78,22 @@ target_link_libraries(performance_test PRIVATE
     pthread
 )
 add_test(NAME PerformanceTest COMMAND performance_test)
+
+# io_uring 测试（可选，需要 liburing）
+find_library(LIBURING_LIBRARY uring)
+if(LIBURING_LIBRARY)
+    message(STATUS "Found liburing: ${LIBURING_LIBRARY}")
+    
+    add_executable(io_uring_test io/io_uring_test.cpp)
+    target_link_libraries(io_uring_test PRIVATE 
+        ZLCoro::zlcoro
+        GTest::gtest
+        GTest::gtest_main
+        pthread
+        ${LIBURING_LIBRARY}
+    )
+    add_test(NAME IoUringTest COMMAND io_uring_test)
+else()
+    message(STATUS "liburing not found, io_uring tests disabled")
+    message(STATUS "  To enable: sudo apt install liburing-dev")
+endif()

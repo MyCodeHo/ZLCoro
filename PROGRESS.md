@@ -1,7 +1,7 @@
 # ZLCoro 项目进度
 
 > 基于 C++20 协程的高性能异步编程框架开发进度  
-> **最后更新**: 2025-12-19 | **版本**: 0.6.0
+> **最后更新**: 2025-12-26 | **版本**: 0.7.0
 
 ## 📊 总体进度
 
@@ -11,12 +11,12 @@
 - ✅ **Phase 3**: Scheduler 调度器
 - ✅ **Phase 4**: Async I/O 异步 I/O
 - ✅ **Phase 5**: 同步原语 (Channel/Mutex/Semaphore/WaitGroup)
-- ✅ **Phase 6**: 性能优化 (工作窃取调度器/内存池)
+- ✅ **Phase 6**: 性能优化 (工作窃取调度器/内存池/io_uring)
 - 🚧 **Phase 7**: 高级功能 (HTTP/WebSocket/DNS)
 - 🚧 **Phase 8**: 生产就绪 (基准测试/文档/部署)
 
 ### 🧪 测试状态
-**78/78 tests passing (100%)** 🎉
+**88/88 tests passing (100%)** 🎉
 
 | 模块 | 测试数 | 状态 |
 |------|--------|------|
@@ -26,12 +26,13 @@
 | I/O | 7 | ✅ |
 | Sync | 14 | ✅ |
 | Performance | 13 | ✅ |
+| io_uring | 10 | ✅ |
 
 ### 📦 代码统计
-- **头文件**: 18 个（Header-Only）
-- **测试文件**: 6 个
+- **头文件**: 22 个（Header-Only）
+- **测试文件**: 7 个
 - **示例程序**: 5 个
-- **代码行数**: ~7500 行
+- **代码行数**: ~8500 行
 
 ---
 
@@ -47,6 +48,8 @@
 │    异步 I/O (io/)                    │
 │    EpollPoller | EventLoop          │
 │    AsyncFile | AsyncSocket          │
+│    IoUringPoller | IoUringFile      │
+│    IoUringSocket                    │
 ├─────────────────────────────────────┤
 │    调度器 (scheduler/)               │
 │    ThreadPool | WorkStealingScheduler │
@@ -351,27 +354,6 @@ Task<void> bad() {
 
 ---
 
-## 🚀 下一步计划
-
-### Phase 6: 性能优化 ✅ 已完成
-- [x] 工作窃取调度器 (WorkStealingScheduler)
-- [x] 对象池和内存池 (ObjectPool/FixedSizeAllocator)
-- [ ] io_uring 支持（真正的异步文件 I/O）
-
-### Phase 7: 高级功能
-- [ ] HTTP 客户端/服务器
-- [ ] Echo 服务器示例
-- [ ] DNS 解析器
-- [ ] WebSocket 支持
-
-### Phase 8: 生产就绪
-- [ ] 完善性能基准测试
-- [ ] 压力测试和稳定性验证
-- [ ] 完整的 API 文档
-- [ ] 生产环境部署指南
-
----
-
 ## 📚 Phase 6: 性能优化
 
 ### WorkStealingScheduler (`include/zlcoro/scheduler/work_stealing_scheduler.hpp`)
@@ -434,16 +416,108 @@ void* ptr = allocator.allocate();
 allocator.deallocate(ptr);
 ```
 
+### io_uring 支持 (`include/zlcoro/io/io_uring*.hpp`)
+
+Linux 5.1+ 高性能异步 I/O 接口：
+- ✅ IoUringPoller: io_uring 封装，支持批量提交/完成
+- ✅ IoUringFile: 真正的异步文件读写
+- ✅ IoUringSocket: 异步网络 I/O (accept/connect/send/recv)
+- ✅ IoUringEventLoop: 简单事件循环
+
+**相比 epoll + 线程池方案的优势**:
+- 真正的异步：内核直接执行 I/O，无需线程池模拟
+- 零拷贝：使用共享内存的 SQ/CQ 环形缓冲区
+- 批量提交：多个请求可以一次系统调用提交
+- 统一接口：支持文件、网络、定时器等多种操作
+
+**性能对比**:
+```
+io_uring 读取 1MB 文件: 439 us
+io_uring 100 次小读取: 570 us (5 us/read)
+```
+
+**API**:
+```cpp
+#include "zlcoro/io/io_uring.hpp"
+
+#ifdef ZLCORO_HAS_IO_URING
+
+IoUringEventLoop loop;
+
+// 文件操作
+IoUringFile file(&loop.poller(), "test.txt", IoUringFile::ReadOnly);
+auto content = co_await file.read_all();
+
+// Socket 操作
+IoUringSocket server(&loop.poller());
+server.create();
+server.set_reuse_addr();
+server.bind("0.0.0.0", 8080);
+server.listen();
+auto client = co_await server.accept();
+auto data = co_await client.recv_string(1024);
+co_await client.send_string("Hello!");
+
+#endif
+```
+
+**编译要求**:
+- Linux 5.1+ 内核
+- liburing 库 (`apt install liburing-dev`)
+- 链接时添加 `-luring`
+
+**测试覆盖 (10 个测试)**:
+- IoUringPoller: 构造/队列深度
+- IoUringFile: 读取/写入/部分读取
+- IoUringSocket: 创建绑定/Echo 服务器
+- 性能测试: 文件读取基准/多次小读取
+
+**示例**: `tests/io/io_uring_test.cpp`
+
+---
+
+## 🚀 下一步计划
+
+### Phase 7: 高级功能
+- [ ] HTTP 客户端/服务器
+- [ ] Echo 服务器示例
+- [ ] DNS 解析器
+- [ ] WebSocket 支持
+
+### Phase 8: 生产就绪
+- [ ] 完善性能基准测试
+- [ ] 压力测试和稳定性验证
+- [ ] 完整的 API 文档
+- [ ] 生产环境部署指南
+
+---
+
+## 📖 核心设计原则
+
+从 11 个 Bug 修复中总结的经验：
+
+1. **协程不应在内部重新调度** - 避免嵌套协程和生命周期问题
+2. **避免循环中使用 lambda 协程** - 使用独立函数确保生命周期明确
+3. **使用 shared_ptr 管理异步对象** - 确保异步执行时对象有效
+4. **数据结构要匹配使用场景** - 如定时器按时间排序而非 ID
+5. **使用循环而非递归** - 避免协程帧堆叠和栈溢出
+6. **添加边界检查** - 防御性编程，检查句柄有效性
+7. **Awaiter 数据生命周期** - 等待队列中的数据必须使用 shared_ptr
+8. **协程只 resume 一次启动** - 之后由 Scheduler 管理
+
 ---
 
 ## 📖 参考资料
 
 - `docs/ARCHITECTURE.md` - 架构设计文档
 - `docs/API.md` - API 参考手册
+- `docs/BENCHMARKS.md` - 性能基准测试报告
 - `BUG_FIX.md` - Bug 修复记录和设计原则
+- `DEVELOPMENT.md` - 开发指南和最佳实践
 
 ---
 
-**项目状态**: 基础功能完成，进入优化和高级功能阶段  
+**项目状态**: 核心功能完成，性能优化就绪，进入高级功能阶段  
+**最后更新**: 2025-12-26 | **版本**: 0.7.0  
 **贡献者**: 欢迎提交 Issue 和 Pull Request  
 **开源协议**: MIT License
