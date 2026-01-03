@@ -189,16 +189,44 @@ private:
     }
 
 private:
-    EpollPoller poller_;                                    // Epoll 轮询器
-    std::atomic<bool> running_;                             // 运行标志
-    std::deque<std::coroutine_handle<>> ready_queue_;       // 就绪队列
-    std::mutex mutex_;                                       // 保护共享数据
+    // =========================================================================
+    // 数据成员
+    // =========================================================================
     
-    // 定时器：按到期时间排序，value 是 (TimerId, Callback)
-    // 使用 multimap 支持多个定时器同时到期
+    /// @brief Epoll 轮询器
+    /// @details 封装 Linux epoll，负责监听 I/O 事件。
+    ///          当文件描述符就绪时，返回关联的协程句柄。
+    EpollPoller poller_;
+    
+    /// @brief 事件循环运行标志（原子）
+    /// @details true 表示循环正在运行，false 表示已停止或将要停止。
+    ///          在 run() 开始时设为 true，调用 stop() 后设为 false。
+    std::atomic<bool> running_;
+    
+    /// @brief 就绪协程队列
+    /// @details 等待执行的协程句柄队列。
+    ///          I/O 事件就绪或通过 schedule() 添加的协程都会进入此队列。
+    ///          使用 deque 支持高效的头部弹出。
+    /// @thread_safety 由 mutex_ 保护
+    std::deque<std::coroutine_handle<>> ready_queue_;
+    
+    /// @brief 互斥锁
+    /// @details 保护 ready_queue_ 和 timers_ 的并发访问。
+    std::mutex mutex_;
+    
+    /// @brief 定时器存储（按到期时间排序）
+    /// @details 使用 multimap 以到期时间为 key，支持：
+    ///          1. 自动按时间排序（便于找到最早到期的定时器）
+    ///          2. 多个定时器同时到期（multimap 允许重复 key）
+    ///          Value 是 (TimerId, Callback) 对。
+    /// @thread_safety 由 mutex_ 保护
     std::multimap<std::chrono::steady_clock::time_point, 
                   std::pair<TimerId, TimerCallback>> timers_;
-    TimerId next_timer_id_;                                 // 下一个定时器 ID
+    
+    /// @brief 定时器 ID 计数器
+    /// @details 递增分配，保证每个定时器有唯一 ID。
+    ///          用于 cancel_timer() 时识别要取消的定时器。
+    TimerId next_timer_id_;
 };
 
 } // namespace zlcoro

@@ -291,11 +291,43 @@ public:
     }
 
 private:
+    // =========================================================================
+    // 数据成员
+    // =========================================================================
+    
+    /// @brief 通道容量
+    /// @details 缓冲区最大存储的元素数量。
+    ///          0 表示无缓冲通道（同步通道），每次发送必须等待接收者。
+    ///          正数表示有缓冲通道，发送者在缓冲区未满时可立即返回。
     size_t capacity_;
+    
+    /// @brief 通道关闭标志（原子）
+    /// @details 一旦设为 true，后续的发送操作会失败，
+    ///          接收操作会在缓冲区清空后返回 nullopt。
+    /// @thread_safety 原子操作保证线程安全
     std::atomic<bool> closed_;
+    
+    /// @brief 数据缓冲区
+    /// @details 存储已发送但未被接收的数据。
+    ///          使用 std::queue 实现 FIFO 语义。
+    /// @thread_safety 由 mutex_ 保护
     std::queue<T> buffer_;
+    
+    /// @brief 发送者等待队列
+    /// @details 当缓冲区满时，发送者协程挂起并加入此队列。
+    ///          当有空间时，从队首取出发送者恢复执行。
+    /// @thread_safety 由 mutex_ 保护
     std::queue<SendWaiter> send_waiters_;
+    
+    /// @brief 接收者等待队列
+    /// @details 当缓冲区空时，接收者协程挂起并加入此队列。
+    ///          当有数据时，从队首取出接收者恢复执行。
+    /// @thread_safety 由 mutex_ 保护
     std::queue<RecvWaiter> recv_waiters_;
+    
+    /// @brief 互斥锁
+    /// @details 保护 buffer_、send_waiters_、recv_waiters_ 的并发访问。
+    ///          标记为 mutable 以便 const 方法（如 size()）也能加锁。
     mutable std::mutex mutex_;
 };
 

@@ -97,3 +97,26 @@ else()
     message(STATUS "liburing not found, io_uring tests disabled")
     message(STATUS "  To enable: sudo apt install liburing-dev")
 endif()
+
+# Runtime 测试（Phase 7: 统一运行时）
+if(LIBURING_LIBRARY)
+    add_executable(runtime_test runtime/runtime_test.cpp)
+    target_link_libraries(runtime_test PRIVATE 
+        ZLCoro::zlcoro
+        GTest::gtest
+        GTest::gtest_main
+        pthread
+        ${LIBURING_LIBRARY}
+    )
+    add_test(NAME RuntimeTest COMMAND runtime_test)
+else()
+    # 无 io_uring 版本
+    add_executable(runtime_test runtime/runtime_test.cpp)
+    target_link_libraries(runtime_test PRIVATE 
+        ZLCoro::zlcoro
+        GTest::gtest
+        GTest::gtest_main
+        pthread
+    )
+    add_test(NAME RuntimeTest COMMAND runtime_test)
+endif()

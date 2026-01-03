@@ -138,19 +138,37 @@ private:
     }
 
 private:
-    // 工作线程
+    // =========================================================================
+    // 数据成员
+    // =========================================================================
+    
+    /// @brief 工作线程数组
+    /// @details 固定数量的工作线程，在构造时创建，析构时 join。
+    ///          每个线程运行 worker_thread() 函数，循环从队列获取任务执行。
+    /// @lifetime 构造时创建，shutdown() 或析构时销毁
     std::vector<std::thread> workers_;
     
-    // 任务队列
+    /// @brief 任务队列（双端队列）
+    /// @details 使用 deque 支持高效的头部弹出和尾部插入。
+    ///          submit() 向尾部添加任务，worker 从头部取出（FIFO）。
+    /// @thread_safety 由 queue_mutex_ 保护
     std::deque<Task> task_queue_;
     
-    // 互斥锁保护任务队列
+    /// @brief 队列互斥锁
+    /// @details 保护 task_queue_ 和 stop_ 的并发访问。
+    ///          标记为 mutable 以便 const 方法（如 pending_tasks）也能加锁。
     mutable std::mutex queue_mutex_;
     
-    // 条件变量用于线程唤醒
+    /// @brief 条件变量
+    /// @details 用于线程间的等待/通知机制：
+    ///          - 工作线程在队列为空时 wait()
+    ///          - submit() 添加任务后 notify_one()
+    ///          - shutdown() 时 notify_all()
     std::condition_variable condition_;
     
-    // 停止标志
+    /// @brief 停止标志（原子）
+    /// @details 设置为 true 时，工作线程会在处理完队列后退出。
+    ///          使用 atomic 以便在锁外快速检查。
     std::atomic<bool> stop_;
 };
 

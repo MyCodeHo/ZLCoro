@@ -348,8 +348,23 @@ public:
     }
 
 private:
-    int fd_;                // socket 文件描述符
-    IoUringPoller* poller_; // io_uring 轮询器
+    // =========================================================================
+    // 数据成员
+    // =========================================================================
+    
+    /// @brief Socket 文件描述符
+    /// @details POSIX socket fd，-1 表示未创建/已关闭。
+    ///          与 AsyncSocket 不同，IoUringSocket 的 I/O 操作直接
+    ///          通过 io_uring 提交，无需设置为非阻塞模式。
+    /// @ownership IoUringSocket 独占所有权
+    int fd_;
+    
+    /// @brief io_uring 轮询器指针
+    /// @details 用于提交和轮询 I/O 操作。
+    ///          所有的 recv/send/connect/accept 操作都通过此轮询器异步执行。
+    /// @lifetime 轮询器必须比 IoUringSocket 活得更长
+    /// @nullable 可为 nullptr（此时无法进行异步操作）
+    IoUringPoller* poller_;
 };
 
 } // namespace zlcoro

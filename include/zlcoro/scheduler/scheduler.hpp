@@ -70,6 +70,14 @@ private:
     }
 
 private:
+    // =========================================================================
+    // 数据成员
+    // =========================================================================
+    
+    /// @brief 底层线程池
+    /// @details 实际执行任务的线程池。Scheduler 是对 ThreadPool 的封装，
+    ///          提供协程友好的接口（如 schedule(coroutine_handle)）。
+    /// @ownership Scheduler 独占所有权
     ThreadPool thread_pool_;
 };
 

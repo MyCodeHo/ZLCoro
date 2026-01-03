@@ -125,10 +125,17 @@ public:
     }
 
 private:
-    // 线程本地队列
+    // =========================================================================
+    // 内部类型
+    // =========================================================================
+    
+    /// @brief 线程本地任务队列
+    /// @details 每个工作线程拥有独立的本地队列，减少锁竞争。
+    ///          本地操作使用后进先出（LIFO，缓存友好），
+    ///          窃取操作使用先进先出（FIFO，公平性）。
     struct LocalQueue {
-        mutable std::mutex mutex;
-        std::deque<Task> tasks;
+        mutable std::mutex mutex;  ///< 保护任务队列的互斥锁
+        std::deque<Task> tasks;    ///< 任务队列（双端，支持 LIFO 和 FIFO）
     };
 
     // 从本地队列取任务（后进先出）
@@ -230,14 +237,46 @@ private:
     }
 
 private:
+    // =========================================================================
+    // 数据成员
+    // =========================================================================
+    
+    /// @brief 工作线程数量
+    /// @details 在构造时确定，通常等于 CPU 核心数。
+    ///          决定了 local_queues_ 的大小和 workers_ 的数量。
     size_t num_threads_;
+    
+    /// @brief 工作线程数组
+    /// @details 每个线程运行 worker_thread() 函数：
+    ///          1. 优先从本地队列取任务（LIFO，缓存友好）
+    ///          2. 本地为空时，随机窃取其他线程的任务（FIFO，公平）
+    ///          3. 都为空时，条件变量等待
+    /// @lifetime 构造时创建，shutdown() 时 join
     std::vector<std::thread> workers_;
+    
+    /// @brief 线程本地任务队列数组
+    /// @details 每个线程对应一个独立的 LocalQueue。
+    ///          使用 unique_ptr 存储以保证指针稳定性（避免 vector 扩容导致失效）。
+    ///          索引与 thread_id 一一对应。
     std::vector<std::unique_ptr<LocalQueue>> local_queues_;
     
+    /// @brief 停止标志（原子）
+    /// @details 设置为 true 后，工作线程在处理完剩余任务后退出。
     std::atomic<bool> stop_;
+    
+    /// @brief 任务计数器（原子，用于轮询分配）
+    /// @details submit() 时递增，取模后得到目标队列索引。
+    ///          这种轮询策略实现简单的负载均衡。
     std::atomic<size_t> task_counter_{0};
-
+    
+    /// @brief 全局互斥锁
+    /// @details 用于保护 shutdown 操作和条件变量等待。
+    ///          注意：任务队列使用各自的 LocalQueue::mutex。
     std::mutex global_mutex_;
+    
+    /// @brief 条件变量（线程等待/唤醒）
+    /// @details 当队列为空时，工作线程 wait_for() 等待。
+    ///          submit() 后 notify_one()，shutdown() 后 notify_all()。
     std::condition_variable cv_;
 };
 

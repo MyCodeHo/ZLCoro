@@ -1,7 +1,7 @@
 # ZLCoro 项目进度
 
 > 基于 C++20 协程的高性能异步编程框架开发进度  
-> **最后更新**: 2025-12-26 | **版本**: 0.7.0
+> **最后更新**: 2025-12-29 | **版本**: 0.8.0
 
 ## 📊 总体进度
 
@@ -12,11 +12,11 @@
 - ✅ **Phase 4**: Async I/O 异步 I/O
 - ✅ **Phase 5**: 同步原语 (Channel/Mutex/Semaphore/WaitGroup)
 - ✅ **Phase 6**: 性能优化 (工作窃取调度器/内存池/io_uring)
-- 🚧 **Phase 7**: 高级功能 (HTTP/WebSocket/DNS)
+- ✅ **Phase 7**: 应用层框架 (Runtime/TCP/Timer/RWLock)
 - 🚧 **Phase 8**: 生产就绪 (基准测试/文档/部署)
 
 ### 🧪 测试状态
-**88/88 tests passing (100%)** 🎉
+**118/118 tests passing (100%)** 🎉
 
 | 模块 | 测试数 | 状态 |
 |------|--------|------|
@@ -27,12 +27,13 @@
 | Sync | 14 | ✅ |
 | Performance | 13 | ✅ |
 | io_uring | 10 | ✅ |
+| Runtime | 30 | ✅ |
 
 ### 📦 代码统计
-- **头文件**: 22 个（Header-Only）
-- **测试文件**: 7 个
+- **头文件**: 26 个（Header-Only）
+- **测试文件**: 8 个
 - **示例程序**: 5 个
-- **代码行数**: ~8500 行
+- **代码行数**: ~10000 行
 
 ---
 
@@ -41,15 +42,21 @@
 ```
 ┌─────────────────────────────────────┐
 │         应用层                       │
+│    Runtime | TcpServer | Timer      │
+├─────────────────────────────────────┤
+│    网络层 (net/)                     │
+│    TcpServer | TcpConnection        │
+│    TcpListener | TcpClient          │
 ├─────────────────────────────────────┤
 │    同步原语 (sync/)                  │
-│    Channel | Mutex | WaitGroup      │
+│    Mutex | RWLock | Channel         │
+│    Semaphore | WaitGroup | Timer    │
+│    CancellationToken                │
 ├─────────────────────────────────────┤
 │    异步 I/O (io/)                    │
 │    EpollPoller | EventLoop          │
-│    AsyncFile | AsyncSocket          │
 │    IoUringPoller | IoUringFile      │
-│    IoUringSocket                    │
+│    AsyncFile | AsyncSocket          │
 ├─────────────────────────────────────┤
 │    调度器 (scheduler/)               │
 │    ThreadPool | WorkStealingScheduler │
@@ -476,15 +483,129 @@ co_await client.send_string("Hello!");
 
 ---
 
+## 📚 Phase 7: 应用层框架
+
+### Runtime (`include/zlcoro/runtime/runtime.hpp`)
+
+**统一的运行时入口**，整合调度器和 I/O 轮询器：
+- ✅ `spawn()`: 提交协程任务
+- ✅ `block_on()`: 阻塞等待任务完成
+- ✅ `shutdown()`: 优雅关闭
+- ✅ 自动管理工作线程和 I/O 轮询
+
+**API**:
+```cpp
+Runtime runtime(4);  // 4 个工作线程
+
+// 提交任务
+runtime.spawn(my_task());
+
+// 阻塞等待
+int result = runtime.block_on(compute());
+
+// 优雅关闭
+runtime.shutdown();
+```
+
+### TcpServer/TcpConnection (`include/zlcoro/net/tcp.hpp`)
+
+**TCP 网络框架**：
+- ✅ `TcpListener`: 监听和接受连接
+- ✅ `TcpConnection`: 连接读写抽象（缓冲读取）
+- ✅ `TcpServer`: 高层服务器框架
+- ✅ `TcpClient`: 客户端连接
+
+**API**:
+```cpp
+TcpServer server;
+server.on_connection([](TcpConnection conn) -> Task<void> {
+    auto line = co_await conn.read_line();
+    co_await conn.write("Echo: " + line);
+});
+co_await server.serve("0.0.0.0", 8080);
+```
+
+### Timer (`include/zlcoro/sync/timer.hpp`)
+
+**协程定时器**：
+- ✅ `Timer::sleep()`: 休眠指定时间
+- ✅ `Timer::timeout()`: 带超时的操作
+- ✅ `Interval`: 周期性定时器
+
+**API**:
+```cpp
+// 休眠
+co_await Timer::sleep(std::chrono::seconds(1));
+
+// 超时
+auto result = co_await Timer::timeout(
+    some_operation(),
+    std::chrono::seconds(5)
+);
+```
+
+### CancellationToken (`include/zlcoro/sync/cancellation.hpp`)
+
+**协程取消机制**：
+- ✅ `CancellationSource`: 取消源
+- ✅ `CancellationToken`: 取消令牌
+- ✅ 取消回调支持
+- ✅ `throw_if_cancelled()` 异常模式
+
+**API**:
+```cpp
+CancellationSource source;
+auto token = source.token();
+
+Task<void> worker(CancellationToken token) {
+    while (!token.is_cancelled()) {
+        co_await do_work();
+    }
+}
+
+// 取消任务
+source.cancel();
+```
+
+### RWLock (`include/zlcoro/sync/rwlock.hpp`)
+
+**协程读写锁**：
+- ✅ 多读单写语义
+- ✅ `read_lock()` / `write_lock()`
+- ✅ `try_read_lock()` / `try_write_lock()`
+- ✅ 写锁降级为读锁
+
+**API**:
+```cpp
+RWLock lock;
+
+// 读取
+{
+    auto guard = co_await lock.read_lock();
+    // 多个协程可以同时读
+}
+
+// 写入
+{
+    auto guard = co_await lock.write_lock();
+    // 独占访问
+}
+```
+
+**测试覆盖 (30 个测试)**:
+- Runtime: 构造/关闭/spawn/block_on
+- CancellationToken: 状态/回调/异常
+- Timer: sleep/deadline
+- RWLock: 读锁/写锁/多读者
+- 集成测试: 并发任务
+
+---
+
 ## 🚀 下一步计划
 
-### Phase 7: 高级功能
+### Phase 8: 生产就绪
 - [ ] HTTP 客户端/服务器
 - [ ] Echo 服务器示例
-- [ ] DNS 解析器
-- [ ] WebSocket 支持
-
-### Phase 8: 生产就绪
 - [ ] 完善性能基准测试
 - [ ] 压力测试和稳定性验证
 - [ ] 完整的 API 文档
@@ -517,7 +638,7 @@ co_await client.send_string("Hello!");
 
 ---
 
-**项目状态**: 核心功能完成，性能优化就绪，进入高级功能阶段  
-**最后更新**: 2025-12-26 | **版本**: 0.7.0  
+**项目状态**: 应用层框架完成，可用于实际项目开发  
+**最后更新**: 2025-12-29 | **版本**: 0.8.0  
 **贡献者**: 欢迎提交 Issue 和 Pull Request  
 **开源协议**: MIT License

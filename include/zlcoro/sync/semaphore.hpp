@@ -193,9 +193,31 @@ public:
     }
 
 private:
+    // =========================================================================
+    // 数据成员
+    // =========================================================================
+    
+    /// @brief 当前可用许可数
+    /// @details 表示可以立即获取的许可数量。
+    ///          acquire() 会减少此计数，release() 会增加（不超过 max_count_）。
+    ///          当 count_ 为 0 时，acquire() 的协程会挂起等待。
+    /// @thread_safety 由 mutex_ 保护
     int count_;
+    
+    /// @brief 最大许可数
+    /// @details 限制信号量的上界，防止 release() 调用次数超过 acquire()。
+    ///          这是一个常量，在构造后不会改变。
     int max_count_;
+    
+    /// @brief 等待者队列
+    /// @details 当 count_ 为 0 时，试图获取许可的协程会加入此队列。
+    ///          release() 会从队首取出协程恢复执行（FIFO）。
+    /// @thread_safety 由 mutex_ 保护
     std::queue<std::coroutine_handle<>> waiters_;
+    
+    /// @brief 互斥锁
+    /// @details 保护 count_ 和 waiters_ 的并发访问。
+    ///          标记为 mutable 以便 const 方法（如 available()）也能加锁。
     mutable std::mutex mutex_;
 };
 

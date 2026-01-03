@@ -363,10 +363,33 @@ private:
         return sqe;
     }
 
-    struct io_uring ring_;          // io_uring 实例
-    unsigned queue_depth_;          // 队列深度
-    std::atomic<size_t> pending_count_;  // 待处理请求数（原子，支持多线程）
-    bool initialized_ = false;      // 是否已初始化
+    // =========================================================================
+    // 数据成员
+    // =========================================================================
+    
+    /// @brief io_uring 实例
+    /// @details Linux io_uring 的核心数据结构，包含：
+    ///          - 提交队列 (SQ)：应用程序向内核提交 I/O 请求
+    ///          - 完成队列 (CQ)：内核向应用程序返回完成结果
+    ///          - ring_fd：io_uring 的文件描述符
+    /// @ownership IoUringPoller 独占所有权
+    struct io_uring ring_;
+    
+    /// @brief 队列深度
+    /// @details 提交队列和完成队列的大小，决定了同时能处理的 I/O 请求数量。
+    ///          通常设置为 256 或 1024，根据并发需求调整。
+    unsigned queue_depth_;
+    
+    /// @brief 待处理请求计数（原子）
+    /// @details 已提交但未完成的 I/O 请求数量。
+    ///          用于判断是否有正在进行的操作，以及调试统计。
+    /// @thread_safety 使用 atomic 保证多线程安全
+    std::atomic<size_t> pending_count_;
+    
+    /// @brief 初始化标志
+    /// @details true 表示 io_uring 已成功初始化，false 表示未初始化或已关闭。
+    ///          防止在未初始化状态下进行操作。
+    bool initialized_ = false;
 };
 
 // =============================================================================
@@ -414,6 +437,16 @@ public:
     }
 
 private:
+    // =========================================================================
+    // 数据成员
+    // =========================================================================
+    
+    /// @brief 关联的 I/O 请求
+    /// @details 指向 IoUringPoller::Request 结构，包含：
+    ///          - coro: I/O 完成后要恢复的协程
+    ///          - result: I/O 操作的返回值
+    ///          - completed: 原子完成标志
+    /// @lifetime 必须在 await_resume() 返回后才能释放
     IoUringPoller::Request* req_;
 };
 

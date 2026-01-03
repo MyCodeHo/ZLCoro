@@ -140,9 +140,27 @@ public:
     }
 
 private:
+    // =========================================================================
+    // 数据成员
+    // =========================================================================
+    
+    /// @brief 锁定状态标志（原子）
+    /// @details true 表示锁被持有，false 表示空闲。
+    ///          使用原子操作保证 try_lock() 的线程安全。
+    /// @thread_safety 原子操作保证线程安全
     std::atomic<bool> locked_;
+    
+    /// @brief 等待者队列
+    /// @details 当锁被持有时，试图获取锁的协程会挂起并加入此队列。
+    ///          unlock() 时从队首取出协程恢复执行（FIFO 保证公平性）。
+    /// @thread_safety 由 queue_mutex_ 保护
     std::queue<std::coroutine_handle<>> waiters_;
-    std::mutex queue_mutex_;  // 保护等待队列
+    
+    /// @brief 等待队列的互斥锁
+    /// @details 保护 waiters_ 的并发访问。
+    ///          注意：这是一个标准互斥锁，用于保护协程等待队列，
+    ///          而 locked_ 是协程层面的锁。
+    std::mutex queue_mutex_;
 };
 
 }  // namespace zlcoro

@@ -262,6 +262,72 @@ public:
         co_return total_written;
     }
 
+    // recv 别名（兼容 io_uring_socket 接口）
+    Task<ssize_t> recv(void* buffer, size_t len) {
+        while (true) {
+            ssize_t n = ::recv(fd_, buffer, len, 0);
+            
+            if (n == -1) {
+                if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                    co_await ReadAwaiter{fd_, event_loop_};
+                    continue;
+                }
+                co_return -errno;
+            }
+            
+            co_return n;
+        }
+    }
+
+    // send 别名（兼容 io_uring_socket 接口）
+    Task<void> send(const void* data, size_t len) {
+        const char* ptr = static_cast<const char*>(data);
+        size_t total_written = 0;
+        
+        while (total_written < len) {
+            ssize_t n = ::send(fd_, ptr + total_written, len - total_written, 0);
+            
+            if (n == -1) {
+                if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                    co_await WriteAwaiter{fd_, event_loop_};
+                    continue;
+                }
+                throw std::runtime_error(
+                    std::string("send failed: ") + strerror(errno));
+            }
+            
+            total_written += n;
+        }
+        
+        co_return;
+    }
+
+    // is_valid 别名（兼容 io_uring_socket 接口）
+    bool is_valid() const noexcept {
+        return is_open();
+    }
+
+    // close_sync 别名（兼容 io_uring_socket 接口）
+    void close_sync() {
+        close();
+    }
+
+    // 获取对端地址
+    std::pair<std::string, uint16_t> get_peer_address() const {
+        sockaddr_in addr{};
+        socklen_t len = sizeof(addr);
+        
+        if (getpeername(fd_, reinterpret_cast<sockaddr*>(&addr), &len) == -1) {
+            throw std::runtime_error(
+                std::string("getpeername failed: ") + strerror(errno));
+        }
+        
+        char ip[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &addr.sin_addr, ip, sizeof(ip));
+        
+        return {ip, ntohs(addr.sin_port)};
+    }
+
 private:
     // 设置为非阻塞模式
     void make_nonblocking() {
@@ -310,8 +376,21 @@ private:
     };
 
 private:
-    int fd_;                    // Socket 文件描述符
-    EventLoop& event_loop_;     // 事件循环引用
+    // =========================================================================
+    // 数据成员
+    // =========================================================================
+    
+    /// @brief Socket 文件描述符
+    /// @details POSIX socket fd，-1 表示未创建/已关闭。
+    ///          创建后会设置为非阻塞模式，配合 epoll 使用。
+    /// @ownership AsyncSocket 独占所有权
+    int fd_;
+    
+    /// @brief 事件循环引用
+    /// @details 关联的 EventLoop，用于注册读写事件。
+    ///          当 socket 可读/可写时，EventLoop 会恢复相应的协程。
+    /// @lifetime 必须比 AsyncSocket 活得更长
+    EventLoop& event_loop_;
 };
 
 } // namespace zlcoro

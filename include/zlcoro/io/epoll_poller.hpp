@@ -146,9 +146,27 @@ public:
     }
 
 private:
-    int epfd_ = -1;                                    // epoll 文件描述符
-    std::map<int, EventHandler> handlers_;             // 文件描述符 -> 事件处理器
-    static constexpr int max_events_ = 128;            // 一次最多处理的事件数
+    // =========================================================================
+    // 数据成员
+    // =========================================================================
+    
+    /// @brief epoll 实例的文件描述符
+    /// @details 由 epoll_create1() 创建，用于 epoll_ctl() 和 epoll_wait()。
+    ///          -1 表示未初始化或已关闭。
+    /// @ownership EpollPoller 独占所有权
+    int epfd_ = -1;
+    
+    /// @brief 文件描述符到事件处理器的映射
+    /// @details 记录每个 fd 关联的协程句柄和监听的事件类型。
+    ///          当 epoll_wait() 返回时，通过此 map 找到要恢复的协程。
+    ///          使用 map 保证 O(log n) 查找，适合中等规模的 fd 数量。
+    /// @thread_safety 目前非线程安全，需外部同步
+    std::map<int, EventHandler> handlers_;
+    
+    /// @brief 单次 epoll_wait 最多返回的事件数
+    /// @details 这个值影响内存使用和轮询效率的平衡。
+    ///          128 是一个常见的折中值，适合大多数场景。
+    static constexpr int max_events_ = 128;
 };
 
 } // namespace zlcoro

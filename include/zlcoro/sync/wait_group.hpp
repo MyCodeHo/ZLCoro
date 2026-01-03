@@ -126,9 +126,28 @@ public:
     }
 
 private:
-    std::atomic<int> count_;     //需要完成的任务个数
-    std::vector<std::coroutine_handle<>> waiters_;   //任务完成后需要唤醒的协程列表
-    std::mutex mutex_;  // 保护等待者列表
+    // =========================================================================
+    // 数据成员
+    // =========================================================================
+    
+    /// @brief 任务计数器（原子）
+    /// @details 表示剩余需要完成的任务数量。
+    ///          add() 增加计数，done() 减少计数。
+    ///          当计数归零时，所有等待的协程会被唤醒。
+    /// @thread_safety 原子操作保证线程安全
+    std::atomic<int> count_;
+    
+    /// @brief 等待者列表
+    /// @details 调用 wait() 且计数非零的协程会加入此列表。
+    ///          当计数归零时，列表中的所有协程会被批量唤醒。
+    ///          使用 vector 而非 queue 是因为需要一次性唤醒所有等待者。
+    /// @thread_safety 由 mutex_ 保护
+    std::vector<std::coroutine_handle<>> waiters_;
+    
+    /// @brief 互斥锁
+    /// @details 保护 waiters_ 的并发访问。
+    ///          注意：count_ 使用原子操作，不需要此锁保护。
+    std::mutex mutex_;
 };
 
 }  // namespace zlcoro
