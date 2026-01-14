@@ -162,21 +162,28 @@ public:
         {
             std::lock_guard lock(mutex_);
             
-            // 如果有等待者，唤醒第一个
-            if (!waiters_.empty()) {
+            // 如果有等待者，找到第一个有效的等待者
+            while (!waiters_.empty()) {
                 to_resume = waiters_.front();
                 waiters_.pop();
-                // 不增加 count_，因为许可直接转移给等待者
-            } else {
-                // 没有等待者，增加计数
-                if (count_ < max_count_) {
-                    count_++;
+                
+                // 检查协程句柄是否有效且未完成
+                if (to_resume && !to_resume.done()) {
+                    // 许可直接转移给等待者，不增加 count_
+                    break;
                 }
+                // 协程无效或已完成，继续查找下一个
+                to_resume = nullptr;
+            }
+            
+            // 如果没有有效的等待者，增加计数
+            if (!to_resume && count_ < max_count_) {
+                count_++;
             }
         }
         
         // 在锁外使用调度器恢复协程
-        if (to_resume && !to_resume.done()) {
+        if (to_resume) {
             Scheduler::instance().schedule(to_resume);
         }
     }

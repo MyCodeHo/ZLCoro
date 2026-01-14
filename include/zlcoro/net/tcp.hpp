@@ -68,17 +68,27 @@ public:
         , read_end_(other.read_end_)
         , write_buffer_(std::move(other.write_buffer_))
         , closed_(other.closed_) {
+        // 重置源对象状态，防止悬挂引用
+        other.read_pos_ = 0;
+        other.read_end_ = 0;
         other.closed_ = true;
     }
 
     TcpConnection& operator=(TcpConnection&& other) noexcept {
         if (this != &other) {
+            // 先关闭当前连接
+            close_sync();
+            
             socket_ = std::move(other.socket_);
             read_buffer_ = std::move(other.read_buffer_);
             read_pos_ = other.read_pos_;
             read_end_ = other.read_end_;
             write_buffer_ = std::move(other.write_buffer_);
             closed_ = other.closed_;
+            
+            // 重置源对象状态
+            other.read_pos_ = 0;
+            other.read_end_ = 0;
             other.closed_ = true;
         }
         return *this;
@@ -525,9 +535,22 @@ public:
                      CancellationToken token = CancellationToken::none()) {
         listener_.listen(host, port);
 
+        // 注册取消回调：关闭监听 socket 以中断 accept()
+        token.on_cancel([this]() {
+            listener_.close();
+        });
+        
+        // 存储活跃任务（确保协程生命周期）
+        std::vector<std::unique_ptr<Task<void>>> active_tasks;
+
         while (!token.is_cancelled()) {
             try {
                 auto conn = co_await listener_.accept();
+                
+                // 再次检查取消状态（可能在 accept 期间被取消）
+                if (token.is_cancelled()) {
+                    break;
+                }
                 
                 if (handler_) {
                     if (spawn_fn_) {
@@ -536,13 +559,29 @@ public:
                         auto conn_ptr = std::make_shared<TcpConnection>(std::move(conn));
                         auto handler = handler_;  // 复制 handler
                         
-                        spawn_fn_([conn_ptr, handler]() -> Task<void> {
-                            try {
-                                co_await handler(std::move(*conn_ptr));
-                            } catch (const std::exception& e) {
-                                // 记录错误但不影响其他连接
-                            }
-                        }());
+                        // 创建任务并存储以保持生命周期
+                        auto task = std::make_unique<Task<void>>(
+                            [conn_ptr, handler]() -> Task<void> {
+                                try {
+                                    co_await handler(std::move(*conn_ptr));
+                                } catch (const std::exception& e) {
+                                    // 记录错误但不影响其他连接
+                                }
+                            }());
+                        
+                        auto handle = task->handle();
+                        if (handle && !handle.done()) {
+                            handle.resume();
+                        }
+                        active_tasks.push_back(std::move(task));
+                        
+                        // 清理已完成的任务
+                        active_tasks.erase(
+                            std::remove_if(active_tasks.begin(), active_tasks.end(),
+                                [](const std::unique_ptr<Task<void>>& t) {
+                                    return t->handle().done();
+                                }),
+                            active_tasks.end());
                     } else {
                         // 串行处理（原来的行为）
                         try {

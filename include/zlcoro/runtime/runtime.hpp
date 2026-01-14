@@ -131,91 +131,83 @@ public:
     // =========================================================================
 
     // 阻塞等待 Task<void> 完成
+    // 优化版本：对于简单同步协程，直接在当前线程执行，避免调度开销
     void block_on(Task<void> task) {
-        std::promise<void> promise;
-        auto future = promise.get_future();
-
-        auto task_ptr = std::make_shared<Task<void>>(std::move(task));
-        auto promise_ptr = std::make_shared<std::promise<void>>(std::move(promise));
+        auto handle = task.handle();
+        if (!handle || handle.done()) {
+            return;
+        }
         
-        // 创建一个完成通知机制
-        auto done_flag = std::make_shared<std::atomic<bool>>(false);
-        auto done_cv = std::make_shared<std::condition_variable>();
-        auto done_mutex = std::make_shared<std::mutex>();
-
-        scheduler_.submit([this, task_ptr, promise_ptr, done_flag, done_cv, done_mutex]() {
-            try {
-                auto handle = task_ptr->handle();
-                if (handle && !handle.done()) {
-                    // 只恢复一次，让协程自行调度
-                    handle.resume();
-                    
-                    // 如果协程挂起（未完成），我们需要等待它被调度完成
-                    // 这里使用轮询但加入休眠，避免忙等待
-                    while (!handle.done()) {
-                        // 短暂让出 CPU，让其他任务有机会执行
-                        std::this_thread::sleep_for(std::chrono::microseconds(100));
-                        
-                        // 检查是否已经完成
-                        if (handle.done()) break;
-                        
-                        // 尝试恢复（如果协程还在等待可能不会做什么）
-                        // 注意：真正的异步协程会通过 I/O 完成或定时器触发来恢复
-                    }
-                    
-                    // 检查异常
-                    task_ptr->result();
-                }
-                promise_ptr->set_value();
-            } catch (...) {
-                promise_ptr->set_exception(std::current_exception());
+        // 对于简单的同步协程，直接执行到完成
+        // 这避免了调度器的开销
+        handle.resume();
+        
+        // 如果协程立即完成（没有真正的异步等待），直接返回
+        if (handle.done()) {
+            task.result();  // 检查异常
+            return;
+        }
+        
+        // 如果协程没有立即完成，说明有异步操作
+        // 使用条件变量等待完成
+        std::mutex mtx;
+        std::condition_variable cv;
+        std::atomic<bool> done{false};
+        
+        // 提交一个等待任务到调度器
+        scheduler_.submit([&handle, &done, &cv]() {
+            while (!handle.done()) {
+                std::this_thread::yield();
             }
-            
-            // 通知完成
-            {
-                std::lock_guard<std::mutex> lock(*done_mutex);
-                done_flag->store(true, std::memory_order_release);
-            }
-            done_cv->notify_all();
+            done.store(true, std::memory_order_release);
+            cv.notify_one();
         });
-
-        // 等待完成，使用条件变量避免忙等待
-        future.get();
+        
+        // 等待完成
+        std::unique_lock<std::mutex> lock(mtx);
+        cv.wait(lock, [&done]() { return done.load(std::memory_order_acquire); });
+        
+        task.result();  // 检查异常
     }
 
     // 阻塞等待 Task<T> 完成并返回结果
+    // 优化版本：对于简单同步协程，直接在当前线程执行
     template<typename T>
     T block_on(Task<T> task) {
-        std::promise<T> promise;
-        auto future = promise.get_future();
-
-        auto task_ptr = std::make_shared<Task<T>>(std::move(task));
-        auto promise_ptr = std::make_shared<std::promise<T>>(std::move(promise));
-
-        scheduler_.submit([task_ptr, promise_ptr]() {
-            try {
-                auto handle = task_ptr->handle();
-                if (handle && !handle.done()) {
-                    handle.resume();
-                    
-                    // 等待协程完成，加入休眠避免忙等待
-                    while (!handle.done()) {
-                        std::this_thread::sleep_for(std::chrono::microseconds(100));
-                    }
-                    
-                    if constexpr (std::is_void_v<T>) {
-                        task_ptr->result();
-                        promise_ptr->set_value();
-                    } else {
-                        promise_ptr->set_value(std::move(*task_ptr).result());
-                    }
-                }
-            } catch (...) {
-                promise_ptr->set_exception(std::current_exception());
+        auto handle = task.handle();
+        if (!handle) {
+            throw std::runtime_error("Invalid task handle");
+        }
+        
+        // 对于简单的同步协程，直接执行到完成
+        if (!handle.done()) {
+            handle.resume();
+        }
+        
+        // 如果协程立即完成，直接返回结果
+        if (handle.done()) {
+            return std::move(task).result();
+        }
+        
+        // 如果协程没有立即完成，说明有异步操作
+        // 使用条件变量等待完成
+        std::mutex mtx;
+        std::condition_variable cv;
+        std::atomic<bool> done{false};
+        
+        scheduler_.submit([&handle, &done, &cv]() {
+            while (!handle.done()) {
+                std::this_thread::yield();
             }
+            done.store(true, std::memory_order_release);
+            cv.notify_one();
         });
-
-        return future.get();
+        
+        // 等待完成
+        std::unique_lock<std::mutex> lock(mtx);
+        cv.wait(lock, [&done]() { return done.load(std::memory_order_acquire); });
+        
+        return std::move(task).result();
     }
 
     // =========================================================================

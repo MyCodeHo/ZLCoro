@@ -1,6 +1,7 @@
 #pragma once
 
 #include <sys/epoll.h>
+#include <sys/eventfd.h>
 #include <unistd.h>
 #include <coroutine>
 #include <stdexcept>
@@ -16,6 +17,7 @@ namespace zlcoro {
 // 
 // 封装 Linux epoll API，用于高效的 I/O 事件监听。
 // 支持注册文件描述符，等待事件，并在事件就绪时恢复协程。
+// 使用 eventfd 支持中断 epoll_wait 实现优雅关闭。
 // =============================================================================
 
 class EpollPoller {
@@ -35,12 +37,31 @@ public:
         uint32_t events;                // 监听的事件
     };
 
-    // 构造函数：创建 epoll 实例
+    // 构造函数：创建 epoll 实例和 wakeup eventfd
     EpollPoller() {
         epfd_ = epoll_create1(0);
         if (epfd_ == -1) {
             throw std::runtime_error(
                 std::string("epoll_create1 failed: ") + strerror(errno));
+        }
+        
+        // 创建用于唤醒 epoll_wait 的 eventfd
+        wakeup_fd_ = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+        if (wakeup_fd_ == -1) {
+            close(epfd_);
+            throw std::runtime_error(
+                std::string("eventfd failed: ") + strerror(errno));
+        }
+        
+        // 注册 wakeup_fd 到 epoll
+        epoll_event ev;
+        ev.events = EPOLLIN;
+        ev.data.fd = wakeup_fd_;
+        if (epoll_ctl(epfd_, EPOLL_CTL_ADD, wakeup_fd_, &ev) == -1) {
+            close(wakeup_fd_);
+            close(epfd_);
+            throw std::runtime_error(
+                std::string("epoll_ctl ADD wakeup_fd failed: ") + strerror(errno));
         }
     }
 
@@ -50,9 +71,19 @@ public:
 
     // 析构函数
     ~EpollPoller() {
+        if (wakeup_fd_ != -1) {
+            close(wakeup_fd_);
+        }
         if (epfd_ != -1) {
             close(epfd_);
         }
+    }
+
+    // 唤醒正在阻塞的 epoll_wait
+    void wakeup() {
+        uint64_t val = 1;
+        [[maybe_unused]] ssize_t n = write(wakeup_fd_, &val, sizeof(val));
+        // 忽略写入错误，可能多次调用
     }
 
     // 添加文件描述符监听
@@ -122,6 +153,14 @@ public:
             int fd = events[i].data.fd;
             uint32_t revents = events[i].events;
             
+            // 跳过 wakeup fd（只是用于中断 epoll_wait）
+            if (fd == wakeup_fd_) {
+                // 消耗掉 eventfd 的值
+                uint64_t val;
+                [[maybe_unused]] ssize_t r = read(wakeup_fd_, &val, sizeof(val));
+                continue;
+            }
+            
             auto it = handlers_.find(fd);
             if (it != handlers_.end()) {
                 // 检查是否触发了我们关心的事件或错误事件
@@ -155,6 +194,10 @@ private:
     ///          -1 表示未初始化或已关闭。
     /// @ownership EpollPoller 独占所有权
     int epfd_ = -1;
+    
+    /// @brief 用于唤醒 epoll_wait 的 eventfd
+    /// @details 通过写入 eventfd 可以中断阻塞的 epoll_wait，实现优雅关闭。
+    int wakeup_fd_ = -1;
     
     /// @brief 文件描述符到事件处理器的映射
     /// @details 记录每个 fd 关联的协程句柄和监听的事件类型。

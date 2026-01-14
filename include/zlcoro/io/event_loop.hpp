@@ -65,6 +65,7 @@ public:
     // 停止事件循环
     void stop() {
         running_ = false;
+        poller_.wakeup();  // 唤醒可能阻塞的 epoll_wait
     }
 
     // 调度一个协程（加入就绪队列）

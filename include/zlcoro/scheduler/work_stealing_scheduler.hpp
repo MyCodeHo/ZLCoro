@@ -230,8 +230,8 @@ private:
                     continue;  // 还有任务，继续处理
                 }
 
-                // 等待新任务，增加等待时间避免 CPU 空转
-                cv_.wait_for(lock, std::chrono::milliseconds(10));
+                // 等待新任务，使用较短的超时以提高响应性
+                cv_.wait_for(lock, std::chrono::microseconds(100));
             }
         }
     }

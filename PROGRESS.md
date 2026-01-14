@@ -1,7 +1,7 @@
 # ZLCoro 项目进度
 
 > 基于 C++20 协程的高性能异步编程框架开发进度  
-> **最后更新**: 2025-12-29 | **版本**: 0.8.0
+> **最后更新**: 2025-01-06 | **版本**: 0.9.0
 
 ## 📊 总体进度
 
@@ -13,7 +13,7 @@
 - ✅ **Phase 5**: 同步原语 (Channel/Mutex/Semaphore/WaitGroup)
 - ✅ **Phase 6**: 性能优化 (工作窃取调度器/内存池/io_uring)
 - ✅ **Phase 7**: 应用层框架 (Runtime/TCP/Timer/RWLock)
-- 🚧 **Phase 8**: 生产就绪 (基准测试/文档/部署)
+- ✅ **Phase 8**: 生产就绪 (HTTP服务器/网络示例/基准测试)
 
 ### 🧪 测试状态
 **118/118 tests passing (100%)** 🎉
@@ -30,10 +30,11 @@
 | Runtime | 30 | ✅ |
 
 ### 📦 代码统计
-- **头文件**: 26 个（Header-Only）
+- **头文件**: 27 个（Header-Only）
 - **测试文件**: 8 个
-- **示例程序**: 5 个
-- **代码行数**: ~10000 行
+- **示例程序**: 8 个
+- **基准测试**: 3 个
+- **代码行数**: ~12000 行
 
 ---
 
@@ -601,15 +602,79 @@ RWLock lock;
 
 ---
 
-## 🚀 下一步计划
+## 🚀 Phase 8: 生产就绪（已完成）
 
-### Phase 8: 生产就绪
-- [ ] HTTP 客户端/服务器
-- [ ] Echo 服务器示例
-- [ ] 完善性能基准测试
-- [ ] 压力测试和稳定性验证
-- [ ] 完整的 API 文档
-- [ ] 生产环境部署指南
+### HTTP 服务器 (`include/zlcoro/net/http.hpp`)
+
+**轻量级 HTTP/1.1 服务器框架**：
+- ✅ `HttpRequest`: HTTP 请求解析（方法、路径、头部、请求体）
+- ✅ `HttpResponse`: HTTP 响应构建（状态码、头部、响应体）
+- ✅ `HttpServer`: 路由注册和请求分发
+- ✅ 支持 GET/POST/PUT/DELETE 等常用方法
+- ✅ 支持自定义 404 和错误处理器
+
+**API**:
+```cpp
+HttpServer server;
+
+server.get("/", [](const HttpRequest& req) -> Task<HttpResponse> {
+    co_return HttpResponse::ok("Hello, World!");
+});
+
+server.get("/json", [](const HttpRequest& req) -> Task<HttpResponse> {
+    co_return HttpResponse::json(R"({"message": "Hello"})");
+});
+
+server.post("/echo", [](const HttpRequest& req) -> Task<HttpResponse> {
+    co_return HttpResponse::json(req.body());
+});
+
+co_await server.serve("0.0.0.0", 8080);
+```
+
+### 网络示例
+
+#### Echo 服务器 (`examples/network/echo_server.cpp`)
+- ✅ 完整的 TCP Echo 服务器
+- ✅ 支持并发连接处理
+- ✅ 优雅关闭（信号处理）
+- ✅ 连接统计
+
+#### Echo 客户端 (`examples/network/echo_client.cpp`)
+- ✅ 交互式 Echo 客户端
+- ✅ 自动重连支持
+
+#### HTTP 服务器 (`examples/network/http_server.cpp`)
+- ✅ 多路由支持（/, /hello, /json, /time, /echo, /status）
+- ✅ HTML/JSON 响应
+- ✅ 自定义 404 页面
+
+### 性能基准测试 (`benchmarks/`)
+
+#### 协程基准测试 (`coroutine_bench.cpp`)
+- ✅ 协程创建/销毁开销
+- ✅ 协程切换延迟
+- ✅ Generator 性能
+- ✅ 大量协程并发
+- ✅ 内存占用估算
+- ✅ 协程 vs 函数调用对比
+
+#### 调度器基准测试 (`scheduler_bench.cpp`)
+- ✅ 任务提交性能
+- ✅ 任务调度延迟
+- ✅ 线程池扩展性
+- ✅ 任务窃取效率
+- ✅ 并发任务吞吐量
+- ✅ 协程链式调用性能
+- ✅ Runtime 配置对比
+
+#### I/O 基准测试 (`io_bench.cpp`)
+- ✅ Epoll 事件处理性能
+- ✅ 文件异步读写性能
+- ✅ TCP 连接性能
+- ✅ 网络吞吐量
+- ✅ Timer 精度测试
+- ✅ Event Loop 性能
 
 ---
 
@@ -638,7 +703,7 @@ RWLock lock;
 
 ---
 
-**项目状态**: 应用层框架完成，可用于实际项目开发  
-**最后更新**: 2025-12-29 | **版本**: 0.8.0  
+**项目状态**: 生产就绪，可用于实际项目开发  
+**最后更新**: 2025-01-06 | **版本**: 0.9.0  
 **贡献者**: 欢迎提交 Issue 和 Pull Request  
 **开源协议**: MIT License
