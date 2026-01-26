@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstring>
 #include <thread>
+#include <chrono>
 #include <vector>
 #include <atomic>
 #include <csignal>
@@ -26,6 +27,8 @@ using namespace zlcoro;
 std::atomic<bool> g_running{true};
 std::atomic<uint64_t> g_total_connections{0};
 std::atomic<uint64_t> g_total_requests{0};
+uint32_t g_cpu_iters = 0;
+uint32_t g_io_wait_us = 0;
 
 void signal_handler(int) {
     g_running = false;
@@ -41,6 +44,19 @@ static const char HTTP_RESPONSE[] =
     "Hello, World!";
 
 static const size_t RESPONSE_LEN = sizeof(HTTP_RESPONSE) - 1;
+
+static inline void simulate_cpu_work(uint32_t iters) {
+    if (iters == 0) return;
+    volatile uint64_t x = 0x9e3779b97f4a7c15ULL;
+    for (uint32_t i = 0; i < iters; ++i) {
+        x ^= (x << 7) + (x >> 3) + i;
+    }
+}
+
+static inline void simulate_io_wait(uint32_t us) {
+    if (us == 0) return;
+    std::this_thread::sleep_for(std::chrono::microseconds(us));
+}
 
 // =============================================================================
 // epoll 后端
@@ -70,6 +86,9 @@ Task<void> handle_epoll_connection(int fd, EpollPerCoreEventLoop& loop) {
         // 检查是否有完整的 HTTP 请求
         if (memmem(buf, n, "\r\n\r\n", 4)) {
             g_total_requests.fetch_add(1, std::memory_order_relaxed);
+
+            simulate_cpu_work(g_cpu_iters);
+            simulate_io_wait(g_io_wait_us);
             
             // 发送响应
             ssize_t written = ::send(fd, HTTP_RESPONSE, RESPONSE_LEN, MSG_NOSIGNAL);
@@ -197,6 +216,9 @@ Task<void> handle_iouring_connection(int fd, IoUringPerCoreEventLoop& loop) {
         // 检查是否有完整的 HTTP 请求
         if (memmem(buf, n, "\r\n\r\n", 4)) {
             g_total_requests.fetch_add(1, std::memory_order_relaxed);
+
+            simulate_cpu_work(g_cpu_iters);
+            simulate_io_wait(g_io_wait_us);
             
             // 先尝试非阻塞发送
             ssize_t written = ::send(fd, HTTP_RESPONSE, RESPONSE_LEN, MSG_NOSIGNAL | MSG_DONTWAIT);
@@ -275,6 +297,8 @@ void print_usage(const char* prog) {
     printf("  -p <port>    监听端口 (默认: 8080)\n");
     printf("  -c <cores>   核心数 (默认: CPU核数)\n");
     printf("  -u           使用 io_uring 后端\n");
+    printf("  -x <iters>   CPU 计算迭代次数 (默认: 0)\n");
+    printf("  -w <us>      模拟 I/O 等待(微秒) (默认: 0)\n");
 }
 
 int main(int argc, char* argv[]) {
@@ -283,11 +307,13 @@ int main(int argc, char* argv[]) {
     bool use_iouring = false;
     
     int opt;
-    while ((opt = getopt(argc, argv, "p:c:uh")) != -1) {
+    while ((opt = getopt(argc, argv, "p:c:ux:w:h")) != -1) {
         switch (opt) {
             case 'p': port = std::stoi(optarg); break;
             case 'c': num_cores = std::stoi(optarg); break;
             case 'u': use_iouring = true; break;
+            case 'x': g_cpu_iters = static_cast<uint32_t>(std::stoul(optarg)); break;
+            case 'w': g_io_wait_us = static_cast<uint32_t>(std::stoul(optarg)); break;
             case 'h':
             default:
                 print_usage(argv[0]);
@@ -316,6 +342,8 @@ int main(int argc, char* argv[]) {
     printf("核心数: %d\n", num_cores);
     printf("后端: %s\n", use_iouring ? "io_uring" : "epoll");
     printf("架构: 每核独立 listen socket (无惊群)\n");
+    printf("CPU 负载: %u iters/req\n", g_cpu_iters);
+    printf("I/O 等待: %u us/req\n", g_io_wait_us);
     printf("===========================================\n");
     printf("测试命令:\n");
     printf("  wrk -t16 -c400 -d30s http://127.0.0.1:%d/\n", port);

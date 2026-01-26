@@ -236,14 +236,14 @@ int main() {
         print_comparison("中等并发场景", coro, blocking);
     }
 
-    // 测试 3: 高并发 - 协程优势场景
+    // 测试 3: 高并发 - 协程优势场景（减少并发数避免线程资源问题）
     {
-        std::cout << "【测试 3】高并发场景 (16 客户端, 512B 负载)\n\n";
+        std::cout << "【测试 3】高并发场景 (12 客户端, 512B 负载)\n\n";
         
-        auto coro = run_coroutine_benchmark(16, 512, 50, true);
+        auto coro = run_coroutine_benchmark(12, 512, 50, true);
         std::this_thread::sleep_for(std::chrono::milliseconds(300));
         
-        auto blocking = blocking_io::run_blocking_benchmark(16, 512, 50, true);
+        auto blocking = blocking_io::run_blocking_benchmark(12, 512, 50, true);
         std::this_thread::sleep_for(std::chrono::milliseconds(300));
         
         print_comparison("高并发场景", coro, blocking);
@@ -275,14 +275,14 @@ int main() {
         print_comparison("大包传输场景", coro, blocking);
     }
 
-    // 测试 6: 高并发优势场景
+    // 测试 6: 高并发优势场景（减少到 32 客户端避免线程资源问题）
     {
-        std::cout << "【测试 6】高并发优势场景 (64 客户端, 512B 负载)\n\n";
+        std::cout << "【测试 6】高并发优势场景 (32 客户端, 512B 负载)\n\n";
         
-        auto coro = run_coroutine_benchmark(64, 512, 80, true);
+        auto coro = run_coroutine_benchmark(32, 512, 50, true);
         std::this_thread::sleep_for(std::chrono::milliseconds(300));
         
-        auto blocking = blocking_io::run_blocking_benchmark(64, 512, 80, true);
+        auto blocking = blocking_io::run_blocking_benchmark(32, 512, 50, true);
         std::this_thread::sleep_for(std::chrono::milliseconds(300));
         
         print_comparison("高并发优势场景", coro, blocking);

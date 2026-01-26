@@ -1,0 +1,248 @@
+[CPU重负载] epoll-单核
+Running 15s test @ http://127.0.0.1:8080/
+  8 threads and 1000 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency    42.82ms    0.93ms  63.26ms   93.83%
+    Req/Sec     2.93k   117.84     3.20k    71.75%
+  Latency Distribution
+     50%   42.61ms
+     75%   43.20ms
+     90%   43.54ms
+     99%   45.38ms
+  349475 requests in 15.02s, 34.00MB read
+Requests/sec:  23265.15
+Transfer/sec:      2.26MB
+METRICS=23265.15|42.82ms|42.61ms|45.38ms
+
+[CPU重负载] epoll-多核-SO_REUSEPORT
+Running 15s test @ http://127.0.0.1:8080/
+  8 threads and 1000 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency     5.66ms  635.23us  38.31ms   81.82%
+    Req/Sec    22.20k     1.17k   23.48k    89.67%
+  Latency Distribution
+     50%    5.57ms
+     75%    6.03ms
+     90%    6.24ms
+     99%    7.44ms
+  2650877 requests in 15.04s, 257.86MB read
+Requests/sec: 176206.31
+Transfer/sec:     17.14MB
+METRICS=176206.31|5.66ms|5.57ms|7.44ms
+
+[CPU重负载] epoll-多核-惊群
+Running 15s test @ http://127.0.0.1:8080/
+  8 threads and 1000 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency     6.38ms    3.13ms  50.04ms   68.93%
+    Req/Sec    19.70k     6.90k   42.11k    87.50%
+  Latency Distribution
+     50%    7.45ms
+     75%    8.46ms
+     90%    9.27ms
+     99%   10.05ms
+  2352494 requests in 15.03s, 228.84MB read
+Requests/sec: 156480.63
+Transfer/sec:     15.22MB
+METRICS=156480.63|6.38ms|19.70k
+7.45ms|10.05ms
+
+[CPU重负载] io_uring-单核
+Running 15s test @ http://127.0.0.1:8080/
+  8 threads and 1000 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency    37.32ms   59.26ms   1.98s    99.49%
+    Req/Sec     2.81k   497.93     4.17k    66.50%
+  Latency Distribution
+     50%   33.76ms
+     75%   38.78ms
+     90%   43.94ms
+     99%   45.72ms
+  336108 requests in 15.03s, 32.69MB read
+  Socket errors: connect 0, read 0, write 0, timeout 376
+Requests/sec:  22367.80
+Transfer/sec:      2.18MB
+METRICS=22367.80|37.32ms|2.81k
+33.76ms|45.72ms
+
+[CPU重负载] io_uring-多核-SO_REUSEPORT
+Running 15s test @ http://127.0.0.1:8080/
+  8 threads and 1000 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency     6.51ms    7.53ms 327.06ms   99.56%
+    Req/Sec    20.47k     1.74k   26.17k    65.08%
+  Latency Distribution
+     50%    6.08ms
+     75%    6.45ms
+     90%    7.33ms
+     99%    7.78ms
+  2444524 requests in 15.03s, 237.79MB read
+Requests/sec: 162625.23
+Transfer/sec:     15.82MB
+METRICS=162625.23|6.51ms|6.08ms|7.78ms
+
+[IO等待重负载] epoll-单核
+Running 15s test @ http://127.0.0.1:8080/
+  8 threads and 1000 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency   251.21ms   17.95ms 260.11ms   98.50%
+    Req/Sec   496.40    161.20   840.00     66.44%
+  Latency Distribution
+     50%  253.00ms
+     75%  254.63ms
+     90%  255.33ms
+     99%  256.59ms
+  59154 requests in 15.04s, 5.75MB read
+Requests/sec:   3932.70
+Transfer/sec:    391.73KB
+METRICS=3932.70|251.21ms|251.21ms
+253.00ms|256.59ms
+
+[IO等待重负载] epoll-多核-SO_REUSEPORT
+Running 15s test @ http://127.0.0.1:8080/
+  8 threads and 1000 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency    32.36ms    2.81ms  52.71ms   73.25%
+    Req/Sec     3.87k    96.00     4.10k    77.58%
+  Latency Distribution
+     50%   32.74ms
+     75%   34.26ms
+     90%   35.29ms
+     99%   37.38ms
+  462533 requests in 15.04s, 44.99MB read
+Requests/sec:  30750.34
+Transfer/sec:      2.99MB
+METRICS=30750.34|32.36ms|32.74ms|37.38ms
+
+[IO等待重负载] epoll-多核-惊群
+Running 15s test @ http://127.0.0.1:8080/
+  8 threads and 1000 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency    32.10ms   10.14ms  64.56ms   74.65%
+    Req/Sec     3.91k   165.60     4.24k    74.42%
+  Latency Distribution
+     50%   31.40ms
+     75%   40.22ms
+     90%   51.48ms
+     99%   52.53ms
+  466710 requests in 15.03s, 45.40MB read
+Requests/sec:  31046.47
+Transfer/sec:      3.02MB
+METRICS=31046.47|32.10ms|31.40ms|52.53ms
+
+[IO等待重负载] io_uring-单核
+Running 15s test @ http://127.0.0.1:8080/
+  8 threads and 1000 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency    88.86ms   38.35ms   1.94s    99.51%
+    Req/Sec   484.93    190.51     1.03k    68.92%
+  Latency Distribution
+     50%   88.90ms
+     75%   99.12ms
+     90%  104.89ms
+     99%  107.94ms
+  57953 requests in 15.05s, 5.64MB read
+  Socket errors: connect 0, read 0, write 0, timeout 146
+Requests/sec:   3851.53
+Transfer/sec:    383.65KB
+METRICS=3851.53|88.86ms|88.90ms|107.94ms
+
+[IO等待重负载] io_uring-多核-SO_REUSEPORT
+Running 15s test @ http://127.0.0.1:8080/
+  8 threads and 1000 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency    38.44ms   68.78ms   1.97s    98.86%
+    Req/Sec     3.83k   168.57     4.99k    89.92%
+  Latency Distribution
+     50%   32.57ms
+     75%   34.79ms
+     90%   36.65ms
+     99%  179.37ms
+  457030 requests in 15.03s, 44.46MB read
+  Socket errors: connect 0, read 0, write 0, timeout 2
+Requests/sec:  30402.22
+Transfer/sec:      2.96MB
+METRICS=30402.22|38.44ms|32.57ms|179.37ms
+
+[混合重负载] epoll-单核
+Running 15s test @ http://127.0.0.1:8080/
+  8 threads and 1000 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency   176.23ms    9.89ms 189.23ms   98.95%
+    Req/Sec   707.61    172.05     1.22k    63.67%
+  Latency Distribution
+     50%  177.07ms
+     75%  177.42ms
+     90%  177.89ms
+     99%  178.70ms
+  84553 requests in 15.05s, 8.22MB read
+Requests/sec:   5618.39
+Transfer/sec:    559.64KB
+METRICS=5618.39|176.23ms|177.07ms|178.70ms
+
+[混合重负载] epoll-多核-SO_REUSEPORT
+Running 15s test @ http://127.0.0.1:8080/
+  8 threads and 1000 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency    22.52ms    1.32ms  52.53ms   66.71%
+    Req/Sec     5.57k   119.82     5.84k    83.08%
+  Latency Distribution
+     50%   22.18ms
+     75%   23.56ms
+     90%   24.32ms
+     99%   25.22ms
+  665612 requests in 15.02s, 64.75MB read
+Requests/sec:  44313.62
+Transfer/sec:      4.31MB
+METRICS=44313.62|22.52ms|22.18ms|25.22ms
+
+[混合重负载] epoll-多核-惊群
+Running 15s test @ http://127.0.0.1:8080/
+  8 threads and 1000 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency    22.31ms    9.71ms  59.74ms   74.78%
+    Req/Sec     5.63k     1.01k    8.37k    74.33%
+  Latency Distribution
+     50%   22.31ms
+     75%   29.17ms
+     90%   35.89ms
+     99%   36.37ms
+  671794 requests in 15.04s, 65.35MB read
+Requests/sec:  44679.63
+Transfer/sec:      4.35MB
+METRICS=44679.63|22.31ms|22.31ms|36.37ms
+
+[混合重负载] io_uring-单核
+Running 15s test @ http://127.0.0.1:8080/
+  8 threads and 1000 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency   103.89ms   30.55ms   1.92s    99.44%
+    Req/Sec   699.92    150.47     1.17k    70.33%
+  Latency Distribution
+     50%  103.49ms
+     75%  109.91ms
+     90%  113.41ms
+     99%  116.18ms
+  83636 requests in 15.05s, 8.14MB read
+  Socket errors: connect 0, read 0, write 0, timeout 125
+Requests/sec:   5558.26
+Transfer/sec:    553.65KB
+METRICS=5558.26|103.89ms|103.49ms|116.18ms
+
+[混合重负载] io_uring-多核-SO_REUSEPORT
+Running 15s test @ http://127.0.0.1:8080/
+  8 threads and 1000 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency    24.97ms   33.78ms   1.13s    99.25%
+    Req/Sec     5.52k   193.91     6.67k    89.00%
+  Latency Distribution
+     50%   22.75ms
+     75%   24.81ms
+     90%   27.44ms
+     99%   32.09ms
+  659032 requests in 15.03s, 64.11MB read
+Requests/sec:  43846.23
+Transfer/sec:      4.27MB
+METRICS=43846.23|24.97ms|22.75ms|32.09ms
+
+DONE

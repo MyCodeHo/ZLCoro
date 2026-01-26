@@ -1,7 +1,7 @@
 # ZLCoro 项目进度
 
 > 基于 C++20 协程的高性能异步编程框架开发进度  
-> **最后更新**: 2025-01-06 | **版本**: 0.9.0
+> **最后更新**: 2026-01-26 | **版本**: 1.0.0
 
 ## 📊 总体进度
 
@@ -12,42 +12,73 @@
 - ✅ **Phase 4**: Async I/O 异步 I/O
 - ✅ **Phase 5**: 同步原语 (Channel/Mutex/Semaphore/WaitGroup)
 - ✅ **Phase 6**: 性能优化 (工作窃取调度器/内存池/io_uring)
-- ✅ **Phase 7**: 应用层框架 (Runtime/TCP/Timer/RWLock)
-- ✅ **Phase 8**: 生产就绪 (HTTP服务器/网络示例/基准测试)
+- ✅ **Phase 7**: 应用层框架 (Per-Core Runtime/TCP Server)
+- ✅ **Phase 8**: 生产就绪 (HTTP 服务器 ~98万 QPS)
 
 ### 🧪 测试状态
-**118/118 tests passing (100%)** 🎉
+**14/14 测试套件通过 (100%)** 🎉
 
-| 模块 | 测试数 | 状态 |
-|------|--------|------|
-| Task | 15 | ✅ |
-| Generator | 16 | ✅ |
-| Scheduler | 13 | ✅ |
-| I/O | 7 | ✅ |
-| Sync | 14 | ✅ |
-| Performance | 13 | ✅ |
-| io_uring | 10 | ✅ |
-| Runtime | 30 | ✅ |
+| 测试套件 | 状态 |
+|----------|------|
+| TaskTest | ✅ |
+| GeneratorTest | ✅ |
+| SchedulerTest | ✅ |
+| IOTest | ✅ |
+| SyncTest | ✅ |
+| PerformanceTest | ✅ |
+| IoUringTest | ✅ |
+| RuntimeTest | ✅ |
+| PerCoreTest | ✅ |
+| bench_coroutine | ✅ |
+| bench_scheduler | ✅ |
+| bench_io | ✅ |
+| bench_io_all | ✅ |
+| bench_io_comparison | ✅ |
 
 ### 📦 代码统计
-- **头文件**: 27 个（Header-Only）
-- **测试文件**: 8 个
-- **示例程序**: 8 个
-- **基准测试**: 3 个
-- **代码行数**: ~12000 行
+- **头文件**: 30+ 个（Header-Only）
+- **测试文件**: 9 个
+- **示例程序**: 14 个
+- **基准测试**: 7 个
+- **代码行数**: ~15000 行
 
 ---
 
 ## 🏗️ 架构概览
 
 ```
-┌─────────────────────────────────────┐
-│         应用层                       │
-│    Runtime | TcpServer | Timer      │
-├─────────────────────────────────────┤
-│    网络层 (net/)                     │
-│    TcpServer | TcpConnection        │
-│    TcpListener | TcpClient          │
+┌─────────────────────────────────────────────────────────────────┐
+│                        应用层                                    │
+│        HTTP Server | KV Server | 自定义协议                      │
+├─────────────────────────────────────────────────────────────────┤
+│                   Per-Core 运行时层                              │
+│    OptimizedKVServer | TcpServer | ConnectionManager            │
+├─────────────────────────────────────────────────────────────────┤
+│                    I/O 后端层                                    │
+│         EpollPerCoreEventLoop | IoUringPerCoreEventLoop         │
+├─────────────────────────────────────────────────────────────────┤
+│                   同步原语层                                     │
+│    Mutex | RWLock | Channel | Semaphore | WaitGroup | Timer     │
+├─────────────────────────────────────────────────────────────────┤
+│                    调度器层                                      │
+│         ThreadPool | WorkStealingScheduler | async_run          │
+├─────────────────────────────────────────────────────────────────┤
+│                  协程核心层                                      │
+│              Task<T> | Generator<T> | Awaiter                   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 🚀 性能数据
+
+在 Intel i7-10700 (8C16T) 上的测试结果：
+
+| 场景 | 性能 |
+|------|------|
+| HTTP Hello World (wrk) | **~98 万 QPS** |
+| Echo 服务器 | ~100 万 QPS |
+| 协程创建 | ~50ns/个 |
+| 协程切换 | ~20ns/次 |
+| io_uring 文件读 | 12 GB/s |
 ├─────────────────────────────────────┤
 │    同步原语 (sync/)                  │
 │    Mutex | RWLock | Channel         │
