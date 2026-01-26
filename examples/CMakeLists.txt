@@ -58,3 +58,41 @@ target_link_libraries(http_server PRIVATE
     ZLCoro::zlcoro
     pthread
 )
+
+# ========================================
+# Per-Core 架构示例
+# ========================================
+
+# 示例 6: Per-Core Server (每核心事件循环架构)
+add_executable(06_per_core_server 06_per_core_server.cpp)
+target_link_libraries(06_per_core_server PRIVATE 
+    ZLCoro::zlcoro
+    pthread
+)
+
+# 检查是否有 liburing
+find_library(LIBURING_LIBRARY uring)
+if(LIBURING_LIBRARY)
+    target_link_libraries(06_per_core_server PRIVATE ${LIBURING_LIBRARY})
+    message(STATUS "Per-Core Server: io_uring support enabled")
+else()
+    message(STATUS "Per-Core Server: io_uring not available, using epoll only")
+endif()
+
+# ========================================
+# 性能测试示例
+# ========================================
+
+# HTTP 服务器 v2 - 用于 wrk 性能测试
+add_executable(http_server_v2 benchmark/http_server_v2.cpp)
+target_link_libraries(http_server_v2 PRIVATE 
+    ZLCoro::zlcoro
+    pthread
+)
+
+if(LIBURING_LIBRARY)
+    target_link_libraries(http_server_v2 PRIVATE ${LIBURING_LIBRARY})
+    message(STATUS "HTTP Server v2: io_uring support enabled")
+else()
+    message(STATUS "HTTP Server v2: io_uring not available, using epoll only")
+endif()

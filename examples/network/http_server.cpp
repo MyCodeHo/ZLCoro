@@ -26,6 +26,7 @@
 
 #include "zlcoro/net/http.hpp"
 #include "zlcoro/io/event_loop.hpp"
+#include "zlcoro/scheduler/async.hpp"
 
 #include <iostream>
 #include <chrono>
@@ -295,15 +296,21 @@ int main(int argc, char* argv[]) {
     std::cout << "======================================\n" << std::endl;
     
     try {
-        // 启动服务器协程（必须保持 server_task 存活！）
-        auto server_task = run_server(port);
-        auto handle = server_task.handle();
-        if (handle && !handle.done()) {
-            handle.resume();
-        }
+        // 在独立线程中运行 EventLoop
+        std::thread event_loop_thread([]() {
+            EventLoop::instance().run();
+        });
         
-        // 运行事件循环（阻塞直到 stop() 被调用）
-        EventLoop::instance().run();
+        // 启动服务器协程
+        auto server_future = async_run(run_server(port));
+        
+        // 等待服务器完成
+        server_future.wait();
+        
+        // 停止事件循环并等待线程结束
+        if (event_loop_thread.joinable()) {
+            event_loop_thread.join();
+        }
         
     } catch (const std::exception& e) {
         std::cerr << "[HTTP Server] 致命错误: " << e.what() << "\n";

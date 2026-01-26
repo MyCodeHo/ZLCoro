@@ -15,6 +15,7 @@
 #include "zlcoro/zlcoro.hpp"
 #include "zlcoro/net/tcp.hpp"
 #include "zlcoro/io/event_loop.hpp"
+#include "zlcoro/scheduler/async.hpp"
 
 #include <iostream>
 #include <string>
@@ -43,7 +44,7 @@ Task<void> run_client(const std::string& host, uint16_t port) {
         // 创建 socket 并连接
         AsyncSocket socket;
         socket.create();
-        
+        socket.set_reuse_addr();
         co_await socket.connect(host, port);
         
         std::cout << "[Client] 已连接!\n";
@@ -117,16 +118,21 @@ int main(int argc, char* argv[]) {
         std::cout << "║     ZLCoro Echo Client v0.9.0              ║\n";
         std::cout << "╚════════════════════════════════════════════╝\n";
         
-        // 启动客户端协程（必须保持 client_task 存活！）
-        auto client_task = run_client(host, port);
-        auto handle = client_task.handle();
-        if (handle && !handle.done()) {
-            handle.resume();
-        }
+        // 在独立线程中运行 EventLoop
+        std::thread event_loop_thread([]() {
+            EventLoop::instance().run();
+        });
         
-        // 运行事件循环（阻塞直到协程完成调用 stop()）
-        // 注意：client_task 必须在这里保持存活，否则协程帧会被销毁
-        EventLoop::instance().run();
+        // 启动客户端协程
+        auto client_future = async_run(run_client(host, port));
+        
+        // 等待客户端完成
+        client_future.wait();
+        
+        // 停止事件循环并等待线程结束
+        if (event_loop_thread.joinable()) {
+            event_loop_thread.join();
+        }
         
     } catch (const std::exception& e) {
         std::cerr << "[Client] 致命错误: " << e.what() << "\n";

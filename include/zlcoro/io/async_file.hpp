@@ -220,7 +220,8 @@ private:
 
 // 异步读取整个文件
 // 注意：此函数必须通过 async_run() 调用，不要直接 co_await
-inline Task<std::string> read_file(const std::string& path) {
+// 参数使用值传递，避免协程执行时原参数已被销毁
+inline Task<std::string> read_file(std::string path) {
     // 同步读取文件（在线程池中执行）
     AsyncFile file(path, AsyncFile::ReadOnly);
     co_return file.read_all();
@@ -228,7 +229,8 @@ inline Task<std::string> read_file(const std::string& path) {
 
 // 异步写入整个文件
 // 注意：此函数必须通过 async_run() 调用，不要直接 co_await
-inline Task<void> write_file(const std::string& path, const std::string& content) {
+// 参数使用值传递，避免协程执行时原参数已被销毁
+inline Task<void> write_file(std::string path, std::string content) {
     // 同步写入文件（在线程池中执行）
     AsyncFile file(path, AsyncFile::WriteOnly | AsyncFile::Create | AsyncFile::Truncate);
     file.write(content);
@@ -238,7 +240,8 @@ inline Task<void> write_file(const std::string& path, const std::string& content
 
 // 异步追加到文件
 // 注意：此函数必须通过 async_run() 调用，不要直接 co_await
-inline Task<void> append_file(const std::string& path, const std::string& content) {
+// 参数使用值传递，避免协程执行时原参数已被销毁
+inline Task<void> append_file(std::string path, std::string content) {
     // 同步追加到文件（在线程池中执行）
     AsyncFile file(path, AsyncFile::WriteOnly | AsyncFile::Create | AsyncFile::Append);
     file.write(content);

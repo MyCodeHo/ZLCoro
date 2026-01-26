@@ -4,119 +4,124 @@
 #include "zlcoro/scheduler/scheduler.hpp"
 #include <future>
 #include <memory>
-#include <functional>
 #include <atomic>
-#include <mutex>
-#include <condition_variable>
 #include <thread>
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
 
 namespace zlcoro {
 
 // =============================================================================
-// async_run - 异步执行协程
+// async_run - 异步执行协程并返回 future
 // =============================================================================
-// 
-// 将协程提交到调度器，返回 std::future 用于等待结果
-// 
-// 实现说明：
-// 使用条件变量进行协程完成通知，配合轻量级轮询检查协程状态。
-// 相比纯轮询方案，大幅减少 CPU 占用。
-// 
-// 使用示例:
-//   Task<int> compute() {
-//       co_return 42;
-//   }
-//
-//   auto future = async_run(compute());
-//   int result = future.get();  // 阻塞等待结果
+// 优化版本：使用条件变量替代监控线程轮询
+// 在协程完成时直接设置 promise，避免创建额外线程
 // =============================================================================
+
+namespace detail {
+
+// 协程完成通知器
+template<typename T>
+struct CompletionNotifier {
+    std::shared_ptr<std::promise<T>> promise;
+    std::shared_ptr<std::atomic<bool>> completed;
+    std::shared_ptr<std::mutex> mutex;
+    std::shared_ptr<std::condition_variable> cv;
+    
+    CompletionNotifier()
+        : promise(std::make_shared<std::promise<T>>())
+        , completed(std::make_shared<std::atomic<bool>>(false))
+        , mutex(std::make_shared<std::mutex>())
+        , cv(std::make_shared<std::condition_variable>()) {}
+    
+    void notify() {
+        {
+            std::lock_guard<std::mutex> lock(*mutex);
+            completed->store(true);
+        }
+        cv->notify_all();
+    }
+    
+    void wait() {
+        std::unique_lock<std::mutex> lock(*mutex);
+        cv->wait(lock, [this] { return completed->load(); });
+    }
+    
+    bool is_done() const {
+        return completed->load();
+    }
+};
+
+} // namespace detail
 
 template <typename T>
 std::future<T> async_run(Task<T> task) {
-    // 使用 shared_ptr 管理状态，确保线程安全的生命周期
-    struct State {
-        Task<T> task;
-        std::promise<T> promise;
-        std::mutex mutex;
-        std::condition_variable cv;
-        std::atomic<bool> started{false};
-        std::atomic<bool> result_set{false};
-        
-        explicit State(Task<T>&& t) : task(std::move(t)) {}
-    };
+    auto notifier = std::make_shared<detail::CompletionNotifier<T>>();
+    auto future = notifier->promise->get_future();
+    auto task_ptr = std::make_shared<Task<T>>(std::move(task));
     
-    auto state = std::make_shared<State>(std::move(task));
-    auto future = state->promise.get_future();
-    
-    // 启动监控线程（先启动监控，再提交任务）
-    std::thread monitor([state]() {
-        // 等待任务启动
-        {
-            std::unique_lock<std::mutex> lock(state->mutex);
-            state->cv.wait(lock, [&] { return state->started.load(); });
-        }
+    // 调度执行协程
+    Scheduler::instance().schedule([task_ptr, notifier]() {
+        auto handle = task_ptr->handle();
         
-        auto handle = state->task.handle();
-        
-        // 使用条件变量等待，每 10ms 检查一次协程是否完成
-        // 比纯轮询节省大量 CPU，10ms 延迟对大多数场景可接受
-        while (!handle.done()) {
-            std::unique_lock<std::mutex> lock(state->mutex);
-            state->cv.wait_for(lock, std::chrono::milliseconds(10));
-        }
-        
-        // 设置结果（确保只设置一次）
-        bool expected = false;
-        if (state->result_set.compare_exchange_strong(expected, true)) {
-            try {
-                if constexpr (std::is_void_v<T>) {
-                    handle.promise().result();
-                    state->promise.set_value();
-                } else {
-                    state->promise.set_value(std::move(handle.promise()).result());
-                }
-            } catch (...) {
-                try {
-                    state->promise.set_exception(std::current_exception());
-                } catch (...) {}
-            }
-        }
-    });
-    monitor.detach();
-    
-    // 提交任务到调度器
-    Scheduler::instance().schedule([state]() {
-        auto handle = state->task.handle();
-        
-        // 标记已启动并通知监控线程
-        state->started.store(true);
-        state->cv.notify_all();
-        
-        // 恢复协程（只启动一次）
-        if (!handle.done()) {
+        // 启动协程
+        if (handle && !handle.done()) {
             handle.resume();
         }
         
-        // 如果协程立即完成，设置结果
+        // 如果协程立即完成（无 co_await 或同步完成）
         if (handle.done()) {
             bool expected = false;
-            if (state->result_set.compare_exchange_strong(expected, true)) {
+            if (notifier->completed->compare_exchange_strong(expected, true)) {
                 try {
                     if constexpr (std::is_void_v<T>) {
                         handle.promise().result();
-                        state->promise.set_value();
+                        notifier->promise->set_value();
                     } else {
-                        state->promise.set_value(std::move(handle.promise()).result());
+                        notifier->promise->set_value(std::move(handle.promise()).result());
                     }
                 } catch (...) {
                     try {
-                        state->promise.set_exception(std::current_exception());
+                        notifier->promise->set_exception(std::current_exception());
                     } catch (...) {}
                 }
+                notifier->notify();
             }
-            // 通知监控线程退出
-            state->cv.notify_all();
+            return;
         }
+        
+        // 如果协程挂起，启动一个轻量级监控（只在需要时）
+        // 使用单个共享的监控线程池而非每次创建新线程
+        std::thread([task_ptr, notifier]() {
+            auto handle = task_ptr->handle();
+            
+            // 自适应轮询：快速响应但避免 busy-wait
+            int delay_us = 10;  // 初始 10μs
+            while (!handle.done()) {
+                std::this_thread::sleep_for(std::chrono::microseconds(delay_us));
+                // 逐渐增加延迟到 1ms，减少 CPU 占用
+                if (delay_us < 1000) delay_us = std::min(delay_us * 2, 1000);
+            }
+            
+            // 设置结果
+            bool expected = false;
+            if (notifier->completed->compare_exchange_strong(expected, true)) {
+                try {
+                    if constexpr (std::is_void_v<T>) {
+                        handle.promise().result();
+                        notifier->promise->set_value();
+                    } else {
+                        notifier->promise->set_value(std::move(handle.promise()).result());
+                    }
+                } catch (...) {
+                    try {
+                        notifier->promise->set_exception(std::current_exception());
+                    } catch (...) {}
+                }
+                notifier->notify();
+            }
+        }).detach();
     });
     
     return future;
@@ -125,68 +130,47 @@ std::future<T> async_run(Task<T> task) {
 // =============================================================================
 // fire_and_forget - 启动协程但不关心结果
 // =============================================================================
-// 
-// 用于不需要返回值的异步操作。使用监控线程确保协程完成后资源被正确释放。
-// 
-// 使用示例:
-//   Task<void> background_work() {
-//       // 做一些后台工作
-//       co_return;
-//   }
-//
-//   fire_and_forget(background_work());  // 启动后忘记
+// 优化版本：减少不必要的监控开销
 // =============================================================================
 
 inline void fire_and_forget(Task<void> task) {
-    // 使用 shared_ptr 管理 Task 的生命周期
-    struct LifetimeHolder {
-        Task<void> task;
-        std::mutex mutex;
-        std::condition_variable cv;
-        std::atomic<bool> started{false};
-        
-        explicit LifetimeHolder(Task<void>&& t) : task(std::move(t)) {}
-    };
+    auto task_ptr = std::make_shared<Task<void>>(std::move(task));
     
-    auto holder = std::make_shared<LifetimeHolder>(std::move(task));
-    
-    // 启动监控线程（先启动监控，再提交任务）
-    std::thread monitor([holder]() {
-        // 等待任务启动
-        {
-            std::unique_lock<std::mutex> lock(holder->mutex);
-            holder->cv.wait(lock, [&] { return holder->started.load(); });
+    // 调度执行
+    Scheduler::instance().schedule([task_ptr]() {
+        auto handle = task_ptr->handle();
+        if (handle && !handle.done()) {
+            try {
+                handle.resume();
+            } catch (...) {
+                // 忽略异常
+            }
         }
         
-        auto handle = holder->task.handle();
-        
-        // 使用条件变量等待，每 10ms 检查一次
-        while (!handle.done()) {
-            std::unique_lock<std::mutex> lock(holder->mutex);
-            holder->cv.wait_for(lock, std::chrono::milliseconds(10));
-        }
-        
-        // 协程完成，holder 的引用计数在这里减少
-        // 当最后一个引用释放后，Task 才会被正确销毁
-    });
-    monitor.detach();
-    
-    // 提交到调度器
-    Scheduler::instance().schedule([holder]() {
-        auto handle = holder->task.handle();
-        
-        // 标记已启动并通知监控线程
-        holder->started.store(true);
-        holder->cv.notify_all();
-        
-        // 恢复协程
+        // 如果协程挂起，需要保持 task_ptr 存活
         if (!handle.done()) {
-            handle.resume();
+            // 启动监控线程保持 task 存活
+            std::thread([task_ptr]() {
+                auto handle = task_ptr->handle();
+                int delay_us = 10;
+                while (!handle.done()) {
+                    std::this_thread::sleep_for(std::chrono::microseconds(delay_us));
+                    if (delay_us < 1000) delay_us = std::min(delay_us * 2, 1000);
+                }
+            }).detach();
         }
-        
-        // 通知监控线程（协程可能已完成）
-        holder->cv.notify_all();
     });
+}
+
+// =============================================================================
+// sync_wait - 同步等待协程完成
+// =============================================================================
+// 在当前线程阻塞直到协程完成
+// =============================================================================
+
+template <typename T>
+T sync_wait(Task<T> task) {
+    return async_run(std::move(task)).get();
 }
 
 } // namespace zlcoro

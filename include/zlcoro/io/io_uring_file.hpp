@@ -7,9 +7,11 @@
 #include "zlcoro/core/task.hpp"
 #include <string>
 #include <memory>
+#include <vector>
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <sys/uio.h>
 #include <cstring>
 
 namespace zlcoro {
@@ -125,12 +127,13 @@ public:
             throw std::runtime_error("No IoUringPoller set");
         }
 
-        IoUringPoller::Request req;
-        poller_->prep_read(fd_, buf, len, offset, &req);
+        // 使用 shared_ptr 管理 Request，确保生命周期安全
+        auto req = make_safe_request();
+        poller_->prep_read(fd_, buf, len, offset, req.get());
         poller_->submit();
 
-        co_await IoUringAwaiter(&req);
-        co_return req.result;
+        co_await SafeIoUringAwaiter(req);
+        co_return req->result;
     }
 
     // 异步读取到字符串
@@ -180,12 +183,13 @@ public:
             throw std::runtime_error("No IoUringPoller set");
         }
 
-        IoUringPoller::Request req;
-        poller_->prep_write(fd_, buf, len, offset, &req);
+        // 使用 shared_ptr 管理 Request，确保生命周期安全
+        auto req = make_safe_request();
+        poller_->prep_write(fd_, buf, len, offset, req.get());
         poller_->submit();
 
-        co_await IoUringAwaiter(&req);
-        co_return req.result;
+        co_await SafeIoUringAwaiter(req);
+        co_return req->result;
     }
 
     // 异步写入字符串
@@ -231,12 +235,83 @@ public:
             throw std::runtime_error("No IoUringPoller set");
         }
 
-        IoUringPoller::Request req;
-        poller_->prep_fsync(fd_, &req);
+        // 使用 shared_ptr 管理 Request，确保生命周期安全
+        auto req = make_safe_request();
+        poller_->prep_fsync(fd_, req.get());
         poller_->submit();
 
-        co_await IoUringAwaiter(&req);
-        co_return req.result;
+        co_await SafeIoUringAwaiter(req);
+        co_return req->result;
+    }
+
+    // 异步 fdatasync（只同步数据，不同步元数据）
+    // 比 fsync 更快，适合 WAL 写入
+    Task<int> fdatasync() {
+        if (!is_open()) {
+            throw std::runtime_error("File not open");
+        }
+        if (!poller_) {
+            throw std::runtime_error("No IoUringPoller set");
+        }
+
+        auto req = make_safe_request();
+        poller_->prep_fdatasync(fd_, req.get());
+        poller_->submit();
+
+        co_await SafeIoUringAwaiter(req);
+        co_return req->result;
+    }
+
+    // =========================================================================
+    // Vectored I/O (readv/writev)
+    // =========================================================================
+    // 用于批量读写多个不连续的缓冲区，减少系统调用次数
+    // 对于 KV 存储的 SST 文件读写非常有用
+
+    // 异步向量读
+    // iovs: iovec 数组（必须在操作完成前保持有效）
+    // nr_vecs: iovec 数量
+    // offset: 文件偏移
+    Task<ssize_t> readv(const struct iovec* iovs, unsigned nr_vecs, off_t offset) {
+        if (!is_open()) {
+            throw std::runtime_error("File not open");
+        }
+        if (!poller_) {
+            throw std::runtime_error("No IoUringPoller set");
+        }
+
+        auto req = make_safe_request();
+        poller_->prep_readv(fd_, iovs, nr_vecs, offset, req.get());
+        poller_->submit();
+
+        co_await SafeIoUringAwaiter(req);
+        co_return req->result;
+    }
+
+    // 异步向量写
+    Task<ssize_t> writev(const struct iovec* iovs, unsigned nr_vecs, off_t offset) {
+        if (!is_open()) {
+            throw std::runtime_error("File not open");
+        }
+        if (!poller_) {
+            throw std::runtime_error("No IoUringPoller set");
+        }
+
+        auto req = make_safe_request();
+        poller_->prep_writev(fd_, iovs, nr_vecs, offset, req.get());
+        poller_->submit();
+
+        co_await SafeIoUringAwaiter(req);
+        co_return req->result;
+    }
+
+    // 便捷版本：使用 vector<iovec>
+    Task<ssize_t> readv(std::vector<struct iovec>& iovs, off_t offset) {
+        co_return co_await readv(iovs.data(), iovs.size(), offset);
+    }
+
+    Task<ssize_t> writev(std::vector<struct iovec>& iovs, off_t offset) {
+        co_return co_await writev(iovs.data(), iovs.size(), offset);
     }
 
     // 同步移动文件指针

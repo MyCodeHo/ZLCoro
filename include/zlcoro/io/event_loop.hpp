@@ -68,6 +68,21 @@ public:
         poller_.wakeup();  // 唤醒可能阻塞的 epoll_wait
     }
 
+    // 重置事件循环状态（在 stop() 后调用）
+    void reset() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        
+        // 清理就绪队列中的所有协程
+        ready_queue_.clear();
+        
+        // 清理所有定时器
+        timers_.clear();
+        next_timer_id_ = 0;
+        
+        // 注意：不清理 poller_ 的 handlers_，
+        // 因为 AsyncSocket 会在析构时自动 unregister
+    }
+
     // 调度一个协程（加入就绪队列）
     void schedule(std::coroutine_handle<> coro) {
         std::lock_guard<std::mutex> lock(mutex_);

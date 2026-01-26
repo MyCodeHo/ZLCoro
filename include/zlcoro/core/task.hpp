@@ -371,6 +371,12 @@ public:
         return coro_;
     }
 
+    // 释放协程句柄的所有权（高级用法）
+    // 调用后 Task 不再拥有协程，协程需要手动管理或自行销毁
+    std::coroutine_handle<promise_type> release() noexcept {
+        return std::exchange(coro_, {});
+    }
+
     // 获取结果（需要协程已完成）
     decltype(auto) result() & {
         if constexpr (std::is_void_v<T>) {

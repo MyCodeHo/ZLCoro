@@ -22,6 +22,7 @@
 #include "zlcoro/zlcoro.hpp"
 #include "zlcoro/net/tcp.hpp"
 #include "zlcoro/io/event_loop.hpp"
+#include "zlcoro/scheduler/async.hpp"
 
 #include <iostream>
 #include <string>
@@ -56,9 +57,6 @@ void signal_handler(int sig) {
         if (g_listen_fd >= 0) {
             shutdown(g_listen_fd, SHUT_RDWR);
         }
-        
-        // 停止 EventLoop
-        EventLoop::instance().stop();
     }
 }
 
@@ -89,13 +87,21 @@ Task<void> handle_connection(TcpConnection conn) {
             
             if (line == "quit") {
                 co_await conn.write_line("Goodbye!");
+                // 退出服务器（与 shutdown 一致的收尾流程）
+                g_running.store(false);
+                if (g_listen_fd >= 0) {
+                    shutdown(g_listen_fd, SHUT_RDWR);
+                }
                 break;
             }
             
             if (line == "shutdown") {
                 co_await conn.write_line("Server shutting down...");
                 g_running.store(false);
-                EventLoop::instance().stop();
+                // 唤醒 accept，使其尽快返回
+                if (g_listen_fd >= 0) {
+                    shutdown(g_listen_fd, SHUT_RDWR);
+                }
                 break;
             }
             
@@ -120,34 +126,21 @@ Task<void> handle_connection(TcpConnection conn) {
  */
 Task<void> accept_loop(TcpListener& listener) {
     std::cout << "[Server] 开始接受连接...\n";
-    
-    // 存储活跃的连接任务，确保协程生命周期
-    std::vector<std::unique_ptr<Task<void>>> active_tasks;
-    
+
+    // 跟踪所有连接协程，退出时等待它们收尾
+    std::vector<std::future<void>> client_futures;
+
     while (g_running.load()) {
         try {
             auto conn = co_await listener.accept();
-            
+
             if (!g_running.load()) {
                 break;
             }
-            
-            // 创建连接处理任务并存储（确保生命周期）
-            auto task = std::make_unique<Task<void>>(handle_connection(std::move(conn)));
-            auto handle = task->handle();
-            if (handle && !handle.done()) {
-                handle.resume();
-            }
-            active_tasks.push_back(std::move(task));
-            
-            // 清理已完成的任务
-            active_tasks.erase(
-                std::remove_if(active_tasks.begin(), active_tasks.end(),
-                    [](const std::unique_ptr<Task<void>>& t) {
-                        return t->handle().done();
-                    }),
-                active_tasks.end());
-            
+
+            // 使用 async_run 启动连接处理协程，future 用于生命周期管理
+            client_futures.emplace_back(async_run(handle_connection(std::move(conn))));
+
         } catch (const std::exception& e) {
             if (g_running.load()) {
                 std::cerr << "[Server] Accept 错误: " << e.what() << "\n";
@@ -155,7 +148,16 @@ Task<void> accept_loop(TcpListener& listener) {
             break;
         }
     }
-    
+
+    // 等待所有连接协程结束，避免 EventLoop 停止时仍在运行导致崩溃
+    for (auto& fut : client_futures) {
+        try {
+            fut.wait();
+        } catch (...) {
+            // 忽略单个连接错误，继续收尾
+        }
+    }
+
     std::cout << "[Server] Accept 循环结束\n";
     co_return;
 }
@@ -195,16 +197,22 @@ int main(int argc, char* argv[]) {
         // 保存 listen fd 以便信号处理中关闭
         g_listen_fd = listener.socket().fd();
         
-        // 启动 accept 协程（必须保持 server_task 存活！）
-        auto server_task = accept_loop(listener);
-        auto handle = server_task.handle();
-        if (handle && !handle.done()) {
-            handle.resume();
-        }
+        // 在独立线程中运行 EventLoop
+        std::thread event_loop_thread([]() {
+            EventLoop::instance().run();
+        });
         
-        // 运行事件循环（阻塞直到 stop() 被调用）
-        // 注意：server_task 必须在这里保持存活，否则协程帧会被销毁
-        EventLoop::instance().run();
+        // 启动 accept 协程
+        auto server_future = async_run(accept_loop(listener));
+        
+        // 等待服务器完成
+        server_future.wait();
+        
+        // 停止事件循环并等待线程结束
+        EventLoop::instance().stop();
+        if (event_loop_thread.joinable()) {
+            event_loop_thread.join();
+        }
         
         // 清理
         listener.close();

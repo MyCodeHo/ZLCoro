@@ -727,14 +727,14 @@ void bench_runtime_comparison() {
     print_explanation(
         "测试不同 Runtime 配置下的性能差异（使用 CPU 密集型任务）。\n"
         "         CPU密集型任务应该随线程数增加而加速，直到达到 CPU 核心数。\n"
-        "         轻量级任务可能因同步开销而在单线程下更快。");
+        "         注意：任务粒度需要足够大，否则同步开销会主导结果。");
     
-    const int task_count = 1000;
-    const int work_per_task = 1000;  // 每个任务的计算量
+    const int task_count = 200;        // 减少任务数，每个任务更重
+    const int work_per_task = 50000;   // 大幅增加计算量，让计算主导
     
     std::cout << "  测试参数:\n";
     std::cout << "    - 任务数: " << task_count << " 个 CPU 密集型任务\n";
-    std::cout << "    - 每任务计算量: " << work_per_task << " 次迭代\n\n";
+    std::cout << "    - 每任务计算量: " << work_per_task << " 次迭代（重量级）\n\n";
     
     // 测试不同配置
     struct Config {

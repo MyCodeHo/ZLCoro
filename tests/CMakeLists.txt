@@ -120,3 +120,26 @@ else()
     )
     add_test(NAME RuntimeTest COMMAND runtime_test)
 endif()
+
+# Per-Core 架构测试
+if(LIBURING_LIBRARY)
+    add_executable(per_core_test runtime/per_core_test.cpp)
+    target_link_libraries(per_core_test PRIVATE 
+        ZLCoro::zlcoro
+        GTest::gtest
+        GTest::gtest_main
+        pthread
+        ${LIBURING_LIBRARY}
+    )
+    add_test(NAME PerCoreTest COMMAND per_core_test)
+else()
+    # 无 io_uring 版本（只测试 epoll）
+    add_executable(per_core_test runtime/per_core_test.cpp)
+    target_link_libraries(per_core_test PRIVATE 
+        ZLCoro::zlcoro
+        GTest::gtest
+        GTest::gtest_main
+        pthread
+    )
+    add_test(NAME PerCoreTest COMMAND per_core_test)
+endif()

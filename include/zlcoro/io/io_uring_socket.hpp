@@ -176,7 +176,7 @@ public:
 
     // 异步 accept
     // 返回: 新连接的 socket 封装
-    // 注意：使用 shared_ptr 管理地址信息，确保内核写入时内存有效
+    // 注意：使用 shared_ptr 管理所有动态数据，确保内核写入时内存有效
     Task<IoUringSocket> accept() {
         if (!is_valid()) {
             throw std::runtime_error("Socket not valid");
@@ -193,19 +193,20 @@ public:
         };
         auto accept_data = std::make_shared<AcceptData>();
 
-        IoUringPoller::Request req;
+        // 使用 shared_ptr 管理 Request，确保生命周期安全
+        auto req = make_safe_request();
         poller_->prep_accept(fd_, reinterpret_cast<sockaddr*>(&accept_data->client_addr), 
-                            &accept_data->addr_len, &req);
+                            &accept_data->addr_len, req.get());
         poller_->submit();
 
-        co_await IoUringAwaiter(&req);
+        co_await SafeIoUringAwaiter(req);
         
-        if (req.result < 0) {
+        if (req->result < 0) {
             throw std::runtime_error(
-                std::string("accept failed: ") + strerror(-req.result));
+                std::string("accept failed: ") + strerror(-req->result));
         }
 
-        co_return IoUringSocket(req.result, poller_);
+        co_return IoUringSocket(req->result, poller_);
     }
 
     // 异步 connect
@@ -227,13 +228,14 @@ public:
             throw std::runtime_error("Invalid IP address: " + ip);
         }
 
-        IoUringPoller::Request req;
+        // 使用 shared_ptr 管理 Request，确保生命周期安全
+        auto req = make_safe_request();
         poller_->prep_connect(fd_, reinterpret_cast<const sockaddr*>(addr.get()),
-                             sizeof(sockaddr_in), &req);
+                             sizeof(sockaddr_in), req.get());
         poller_->submit();
 
-        co_await IoUringAwaiter(&req);
-        co_return req.result;
+        co_await SafeIoUringAwaiter(req);
+        co_return req->result;
     }
 
     // 异步 send
@@ -246,12 +248,13 @@ public:
             throw std::runtime_error("No IoUringPoller set");
         }
 
-        IoUringPoller::Request req;
-        poller_->prep_send(fd_, buf, len, flags, &req);
+        // 使用 shared_ptr 管理 Request，确保生命周期安全
+        auto req = make_safe_request();
+        poller_->prep_send(fd_, buf, len, flags, req.get());
         poller_->submit();
 
-        co_await IoUringAwaiter(&req);
-        co_return req.result;
+        co_await SafeIoUringAwaiter(req);
+        co_return req->result;
     }
 
     // 异步发送字符串
@@ -289,12 +292,13 @@ public:
             throw std::runtime_error("No IoUringPoller set");
         }
 
-        IoUringPoller::Request req;
-        poller_->prep_recv(fd_, buf, len, flags, &req);
+        // 使用 shared_ptr 管理 Request，确保生命周期安全
+        auto req = make_safe_request();
+        poller_->prep_recv(fd_, buf, len, flags, req.get());
         poller_->submit();
 
-        co_await IoUringAwaiter(&req);
-        co_return req.result;
+        co_await SafeIoUringAwaiter(req);
+        co_return req->result;
     }
 
     // 异步接收到字符串
@@ -321,14 +325,15 @@ public:
             co_return 0;
         }
 
-        IoUringPoller::Request req;
-        poller_->prep_close(fd_, &req);
+        // 使用 shared_ptr 管理 Request，确保生命周期安全
+        auto req = make_safe_request();
+        poller_->prep_close(fd_, req.get());
         poller_->submit();
 
-        co_await IoUringAwaiter(&req);
+        co_await SafeIoUringAwaiter(req);
         
         fd_ = -1;  // 标记为已关闭
-        co_return req.result;
+        co_return req->result;
     }
 
     // 获取对端地址信息

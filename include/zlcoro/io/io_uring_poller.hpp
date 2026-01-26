@@ -151,6 +151,36 @@ public:
         pending_count_.fetch_add(1, std::memory_order_relaxed);
     }
 
+    // 提交向量读请求 (readv)
+    // iovs: iovec 数组
+    // nr_vecs: iovec 数量
+    void prep_readv(int fd, const struct iovec* iovs, unsigned nr_vecs, off_t offset, Request* req) {
+        struct io_uring_sqe* sqe = get_sqe();
+        if (!sqe) {
+            throw std::runtime_error("SQ ring is full");
+        }
+        
+        io_uring_prep_readv(sqe, fd, iovs, nr_vecs, offset);
+        io_uring_sqe_set_data(sqe, req);
+        req->op_type = OpType::ReadV;
+        req->completed.store(false, std::memory_order_relaxed);
+        pending_count_.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    // 提交向量写请求 (writev)
+    void prep_writev(int fd, const struct iovec* iovs, unsigned nr_vecs, off_t offset, Request* req) {
+        struct io_uring_sqe* sqe = get_sqe();
+        if (!sqe) {
+            throw std::runtime_error("SQ ring is full");
+        }
+        
+        io_uring_prep_writev(sqe, fd, iovs, nr_vecs, offset);
+        io_uring_sqe_set_data(sqe, req);
+        req->op_type = OpType::WriteV;
+        req->completed.store(false, std::memory_order_relaxed);
+        pending_count_.fetch_add(1, std::memory_order_relaxed);
+    }
+
     // 提交 fsync 请求
     void prep_fsync(int fd, Request* req) {
         struct io_uring_sqe* sqe = get_sqe();
@@ -159,6 +189,22 @@ public:
         }
         
         io_uring_prep_fsync(sqe, fd, 0);
+        io_uring_sqe_set_data(sqe, req);
+        req->op_type = OpType::Fsync;
+        req->completed.store(false, std::memory_order_relaxed);
+        pending_count_.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    // 提交 fdatasync 请求（只同步数据，不同步元数据，更快）
+    // 对于 WAL 写入非常有用
+    void prep_fdatasync(int fd, Request* req) {
+        struct io_uring_sqe* sqe = get_sqe();
+        if (!sqe) {
+            throw std::runtime_error("SQ ring is full");
+        }
+        
+        // IORING_FSYNC_DATASYNC 标志表示只同步数据
+        io_uring_prep_fsync(sqe, fd, IORING_FSYNC_DATASYNC);
         io_uring_sqe_set_data(sqe, req);
         req->op_type = OpType::Fsync;
         req->completed.store(false, std::memory_order_relaxed);
@@ -449,6 +495,54 @@ private:
     /// @lifetime 必须在 await_resume() 返回后才能释放
     IoUringPoller::Request* req_;
 };
+
+// =============================================================================
+// SafeIoUringAwaiter - 安全的 io_uring 操作等待器
+// =============================================================================
+// 
+// 使用 shared_ptr 管理 Request 生命周期，确保：
+// 1. 即使协程被取消，Request 也不会被提前释放
+// 2. 内核完成 I/O 时，Request 内存始终有效
+// 3. 避免 use-after-free 和 stack-use-after-scope 问题
+// =============================================================================
+
+class SafeIoUringAwaiter {
+public:
+    explicit SafeIoUringAwaiter(std::shared_ptr<IoUringPoller::Request> req)
+        : req_(std::move(req)) {}
+
+    bool await_ready() const noexcept {
+        return req_->completed.load(std::memory_order_acquire);
+    }
+
+    bool await_suspend(std::coroutine_handle<> coro) noexcept {
+        req_->coro = coro;
+        
+        if (req_->completed.load(std::memory_order_acquire)) {
+            return false;
+        }
+        return true;
+    }
+
+    int await_resume() const noexcept {
+        return req_->result;
+    }
+    
+    // 获取内部 Request 指针（用于准备操作）
+    IoUringPoller::Request* get() const noexcept {
+        return req_.get();
+    }
+
+private:
+    std::shared_ptr<IoUringPoller::Request> req_;
+};
+
+// =============================================================================
+// 辅助函数：创建安全的 Request
+// =============================================================================
+inline std::shared_ptr<IoUringPoller::Request> make_safe_request() {
+    return std::make_shared<IoUringPoller::Request>();
+}
 
 } // namespace zlcoro
 
